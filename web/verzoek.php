@@ -122,6 +122,9 @@ thoth_header(($request ? 'Verzoek #' . $request['id'] : 'Nieuwe ' . strtolower(t
         $name = 'v[' . $key . ']';
         $dis = $editable ? '' : ' disabled';
         $req = $field['verplicht'] ? ' data-verplicht="1"' : '';
+        if (!$editable) {
+            $field['placeholder'] = '';
+        }
         ?>
       <div class="field<?= isset($fieldErrors[$key]) ? ' has-error' : '' ?>">
         <label for="<?= h($inputId) ?>"><?= h($field['name']) ?><?= $field['verplicht'] ? ' <span class="req">*</span>' : '' ?></label>
