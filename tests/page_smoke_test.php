@@ -1,0 +1,76 @@
+<?php
+
+declare(strict_types=1);
+
+/**
+ * Rooktest van de pagina's via php -S (lokaal = ingelogd als eerste $allowedUsers).
+ * Geen echte BC: lege $auth_list, bedrijvenlijst vooraf in de cache gezet.
+ */
+
+require __DIR__ . '/_bootstrap.php';
+
+$data = getenv('THOTH_DATA_DIR');
+$authFile = $data . '/auth.php';
+file_put_contents($authFile, "<?php\n\$allowedUsers = ['anna@kvt.nl'];\n\$approvers = ['anna@kvt.nl'];\n\$auth_list = [];\n");
+file_put_contents($data . '/companies.json', json_encode(['fetched_at' => time(), 'companies' => [
+    ['name' => 'Koninklijke van Twist', 'environment' => 'kvtmdlive_aad'],
+    ['name' => 'Koninklijke van Twist', 'environment' => 'kvtfat_aad'],
+]]));
+
+$port = random_int(20000, 40000);
+$cmd = sprintf('THOTH_DATA_DIR=%s THOTH_AUTH_FILE=%s exec php -S 127.0.0.1:%d -t %s > /dev/null 2>&1',
+    escapeshellarg($data), escapeshellarg($authFile), $port, escapeshellarg(dirname(__DIR__) . '/web'));
+$proc = proc_open($cmd, [], $pipes);
+register_shutdown_function(static fn () => proc_terminate($proc));
+usleep(400000);
+
+$jar = $data . '/cookies.txt';
+function http(string $method, string $path, array $post = [], array $headers = []): array
+{
+    global $port, $jar;
+    $ch = curl_init('http://127.0.0.1:' . $port . '/' . $path);
+    curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_COOKIEJAR => $jar, CURLOPT_COOKIEFILE => $jar, CURLOPT_HTTPHEADER => $headers, CURLOPT_HEADER => false]);
+    if ($method === 'POST') {
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($post));
+    }
+    $body = (string) curl_exec($ch);
+    $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    return [$status, $body];
+}
+
+[$s, $body] = http('GET', 'index.php');
+check_same(200, $s, 'overzicht laadt');
+check(str_contains($body, 'Mijn verzoeken') && str_contains($body, 'Koninklijke van Twist (test: kvtfat_aad)'), 'bedrijvenlijst met testlabel');
+check(str_contains($body, 'Goedkeuren'), 'approver ziet goedkeurmenu');
+preg_match('/name="csrf" value="([a-f0-9]+)"/', $body, $m);
+$csrf = $m[1] ?? '';
+check($csrf !== '', 'CSRF-token in formulier');
+
+[$s, $body] = http('GET', 'verzoek.php?type=servicelocatie');
+check_same(200, $s, 'nieuw formulier laadt');
+check(str_contains($body, 'Voorbeeldconfig') && str_contains($body, 'Inzenden'), 'voorbeeldwaarschuwing en inzendknop');
+[$s, $body] = http('GET', 'verzoek.php?type=component');
+check(str_contains($body, 'data-strikt="1"'), 'component heeft strikte lookup');
+
+[$s, $body] = http('POST', 'api.php', ['actie' => 'opslaan', 'type' => 'servicelocatie', 'v' => ['Name' => 'Test']]);
+check_same(400, $s, 'autosave zonder CSRF geweigerd');
+[$s, $body] = http('POST', 'api.php', ['actie' => 'opslaan', 'csrf' => $csrf, 'type' => 'servicelocatie', 'bedrijf' => 'kvtmdlive_aad|Koninklijke van Twist', 'v' => ['Name' => '<script>x</script>']]);
+$json = json_decode($body, true);
+check_same(200, $s, 'autosave ok');
+check(($json['ok'] ?? false) && preg_match('/^\d{2}:\d{2}:\d{2}$/', (string) ($json['opgeslagen'] ?? '')) === 1, 'Opgeslagen hh:mm:ss');
+$id = (int) ($json['id'] ?? 0);
+[$s, $body] = http('GET', 'verzoek.php?id=' . $id);
+check(str_contains($body, '&lt;script&gt;x&lt;/script&gt;') && !str_contains($body, '<script>x</script>'), 'output ge-escaped');
+check(str_contains($body, 'Historie'), 'historie zichtbaar');
+
+[$s, $body] = http('POST', 'verzoek.php?id=' . $id, ['actie' => 'indienen', 'csrf' => $csrf, 'id' => $id, 'bedrijf' => 'kvtmdlive_aad|Koninklijke van Twist', 'v' => ['Name' => 'Test']]);
+check(str_contains($body, 'Nog niet ingediend'), 'indienen geweigerd zolang verplichte velden leeg zijn');
+
+[$s, $body] = http('GET', 'api.php?actie=zoek&type=component&veld=Service_Location_No&bedrijf=' . rawurlencode('kvtmdlive_aad|Koninklijke van Twist') . '&q=x');
+$json = json_decode($body, true);
+check(isset($json['ok']), 'zoek-endpoint geeft JSON (' . $s . ')');
+
+finish('page_smoke');

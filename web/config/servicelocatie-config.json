@@ -1,0 +1,20 @@
+{
+  "_voorbeeld": "VOORBEELD: verzonnen velden en webservicenamen. Tim levert de echte config; vervang dit bestand en verwijder _voorbeeld.",
+  "auto-increment-field": "No",
+  "autoIncrementPrefix": "SL1",
+  "autoIncrementNumberPadding": 5,
+  "autoIncrementPrefixYear": true,
+  "formFields": [
+    {"name": "Naam", "placeholder": "Bijv. Gemaal De Hoek", "invoerType": "tekst", "bc-tabel": "VOORBEELD_ServiceLocations", "bc-kolom": "Name", "verplicht": true},
+    {"name": "Adres", "placeholder": "Straat en huisnummer", "invoerType": "tekst", "bc-tabel": "VOORBEELD_ServiceLocations", "bc-kolom": "Address", "verplicht": true},
+    {"name": "Postcode", "placeholder": "1234 AB", "invoerType": "tekst", "bc-tabel": "VOORBEELD_ServiceLocations", "bc-kolom": "Post_Code", "verplicht": true},
+    {"name": "Plaats", "placeholder": "Plaats", "invoerType": "tekst", "bc-tabel": "VOORBEELD_ServiceLocations", "bc-kolom": "City", "verplicht": true},
+    {"name": "Klant", "placeholder": "Zoek op klantnummer of naam", "invoerType": "lookup", "bc-tabel": "VOORBEELD_ServiceLocations", "bc-kolom": "Customer_No", "verplicht": true,
+      "optiesBron": {"bc-tabel": "VOORBEELD_Customers", "waarde-kolom": "No", "label-kolommen": ["Name", "City"], "zoek-kolommen": ["No", "Name", "City"]}},
+    {"name": "Type locatie", "placeholder": "", "invoerType": "dropdown", "bc-tabel": "VOORBEELD_ServiceLocations", "bc-kolom": "Location_Type", "verplicht": false,
+      "opties": [{"waarde": "Pumping_Station", "label": "Gemaal", "aliassen": ["Gemaal"]}, {"waarde": "Ship", "label": "Schip", "aliassen": ["Schip"]}, {"waarde": "Plant", "label": "Installatie", "aliassen": ["Installatie"]}]},
+    {"name": "Contactpersoon", "placeholder": "Naam contactpersoon", "invoerType": "combobox", "bc-tabel": "VOORBEELD_ServiceLocations", "bc-kolom": "Contact", "verplicht": false,
+      "opties": ["Bedrijfsleider", "Machinist", "Technische dienst"]},
+    {"name": "In gebruik sinds", "placeholder": "", "invoerType": "date", "bc-tabel": "VOORBEELD_ServiceLocations", "bc-kolom": "Starting_Date", "verplicht": false}
+  ]
+}

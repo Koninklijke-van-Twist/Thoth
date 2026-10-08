@@ -1,0 +1,18 @@
+{
+  "_voorbeeld": "VOORBEELD: verzonnen velden en webservicenamen. Tim levert de echte config; vervang dit bestand en verwijder _voorbeeld.",
+  "auto-increment-field": "No",
+  "autoIncrementPrefix": "CO1",
+  "autoIncrementNumberPadding": 5,
+  "autoIncrementPrefixYear": true,
+  "formFields": [
+    {"name": "Servicelocatie", "placeholder": "Zoek op nummer, naam, adres of plaats", "invoerType": "lookup", "bc-tabel": "VOORBEELD_Components", "bc-kolom": "Service_Location_No", "verplicht": true,
+      "optiesBron": {"bc-tabel": "VOORBEELD_ServiceLocations", "waarde-kolom": "No", "label-kolommen": ["Name", "Address", "City"], "zoek-kolommen": ["No", "Name", "Address", "Post_Code", "City"]}},
+    {"name": "Omschrijving", "placeholder": "Bijv. Hoofdmotor bakboord", "invoerType": "tekst", "bc-tabel": "VOORBEELD_Components", "bc-kolom": "Description", "verplicht": true},
+    {"name": "Merk", "placeholder": "", "invoerType": "dropdown", "bc-tabel": "VOORBEELD_Components", "bc-kolom": "Brand", "verplicht": false,
+      "opties": ["Caterpillar", "Perkins", "MTU", "Volvo Penta", "Anders"]},
+    {"name": "Type", "placeholder": "Bijv. C18", "invoerType": "tekst", "bc-tabel": "VOORBEELD_Components", "bc-kolom": "Model", "verplicht": false},
+    {"name": "Serienummer", "placeholder": "", "invoerType": "tekst", "bc-tabel": "VOORBEELD_Components", "bc-kolom": "Serial_No", "verplicht": true},
+    {"name": "Draaiuren", "placeholder": "0", "invoerType": "nummer", "bc-tabel": "VOORBEELD_Components", "bc-kolom": "Running_Hours", "verplicht": false},
+    {"name": "Installatiedatum", "placeholder": "", "invoerType": "date", "bc-tabel": "VOORBEELD_Components", "bc-kolom": "Installation_Date", "verplicht": false}
+  ]
+}
