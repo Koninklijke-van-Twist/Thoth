@@ -32,7 +32,7 @@ thoth_header('Goedkeuren', 'goedkeuren');
         <td><?= h($r['company']) ?></td>
         <td><?= h($r['owner']) ?></td>
         <td><?= h($r['submitted_at']) ?></td>
-        <td><a class="btn btn-small" href="verzoek.php?id=<?= (int) $r['id'] ?>">Beoordelen</a></td>
+        <td><?php if (thoth_can_decide($r, $thothUser)): ?><a class="btn btn-small" href="verzoek.php?id=<?= (int) $r['id'] ?>">Beoordelen</a><?php else: ?><a href="verzoek.php?id=<?= (int) $r['id'] ?>">Eigen aanvraag</a><div class="muted">Een andere goedkeurder beoordeelt deze.</div><?php endif; ?></td>
       </tr>
     <?php endforeach; ?>
     </tbody>

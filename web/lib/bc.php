@@ -224,8 +224,8 @@ function thoth_bc_read(string $environment, string $company, string $table, arra
 }
 
 /**
- * Bedrijven over alle environments heen: Mímir companies.php, anders per
- * environment in $auth_list direct {base}{env}/ODataV4/Company.
+ * Bedrijven over alle environments heen: Mímir companies.php, aangevuld met
+ * de environments uit $auth_list die Mímir niet kent (direct {base}{env}/ODataV4/Company).
  *
  * @return list<array{name:string, environment:string}>
  */
@@ -242,13 +242,19 @@ function thoth_bc_discover_companies(): array
                     $out[] = ['name' => $name, 'environment' => $env];
                 }
             }
-            if ($out !== []) {
-                return $out;
-            }
         } catch (Throwable $ignored) {
         }
     }
+    // Mímir kent alleen de live-environments. Environments uit $auth_list die
+    // Mímir niet teruggaf (testomgevingen kvtfat_aad, kvtfat2_aad) direct ophalen.
+    $covered = [];
+    foreach ($out as $row) {
+        $covered[strtolower($row['environment'])] = true;
+    }
     foreach (array_keys((array) ($GLOBALS['auth_list'] ?? [])) as $env) {
+        if (isset($covered[strtolower((string) $env)])) {
+            continue;
+        }
         try {
             $auth = thoth_bc_auth_for_environment((string) $env);
             $res = thoth_http('GET', thoth_bc_base_url() . rawurlencode((string) $env) . '/ODataV4/Company', ['Accept: application/json'], null, $auth);
@@ -301,24 +307,91 @@ function thoth_bc_existing_numbers(array $config, string $environment, string $c
 }
 
 /**
+ * Een fout waarbij niet vaststaat of BC het record wél heeft aangemaakt:
+ * verbindingsfout/time-out (status 0), 408, 5xx.
+ */
+function thoth_bc_is_ambiguous_status(int $status): bool
+{
+    return $status === 0 || $status === 408 || $status >= 500;
+}
+
+/**
+ * Zoekt in BC (direct, zelfde auth als de POST, geen cache) naar records met
+ * een van deze nummers en geeft het eerste terug dat bij de payload past.
+ * "Past" = elk tekstveld uit de payload dat BC teruggeeft is gelijk
+ * (hoofdletterongevoelig): zo wordt een record dat een BC-gebruiker intussen
+ * met hetzelfde nummer aanmaakte niet voor het onze aangezien.
+ *
+ * @param list<string> $numbers
+ * @return array{number:string, row:array, matches:bool}|null
+ */
+function thoth_bc_find_reserved(array $config, string $environment, string $company, array $payload, array $numbers): ?array
+{
+    $field = (string) $config['auto-increment-field'];
+    $numbers = array_values(array_unique(array_filter(array_map('strval', $numbers), static fn ($n) => $n !== '')));
+    if ($numbers === []) {
+        return null;
+    }
+    $filter = implode(' or ', array_map(static fn ($n) => $field . " eq '" . thoth_odata_quote($n) . "'", $numbers));
+    $select = array_values(array_unique(array_merge([$field], array_keys($payload))));
+    $rows = thoth_bc_get_all($environment, $company, (string) $config['bc-tabel'], ['$select' => implode(',', $select), '$filter' => $filter]);
+    $found = null;
+    foreach ($rows as $row) {
+        $matches = true;
+        foreach ($payload as $key => $value) {
+            if (!is_string($value) || !array_key_exists($key, $row)) {
+                continue;
+            }
+            if (mb_strtolower(trim((string) $row[$key])) !== mb_strtolower(trim($value))) {
+                $matches = false;
+                break;
+            }
+        }
+        $hit = ['number' => (string) ($row[$field] ?? ''), 'row' => $row, 'matches' => $matches];
+        if ($matches) {
+            return $hit;
+        }
+        $found ??= $hit;
+    }
+
+    return $found;
+}
+
+/**
  * Maakt het record in BC aan. Eén POST met alle velden op één tabel, dus geen
  * half record. Bij een duplicate wordt het volgende vrije nummer geprobeerd,
  * maximaal THOTH_INSERT_MAX_ATTEMPTS keer. Een bestandslock per tabel/bedrijf
  * voorkomt dat twee goedkeuringen tegelijk hetzelfde nummer pakken.
  *
+ * Time-outveilig: vóór elke POST gaat het nummer naar $options['on_reserve'].
+ * Na een time-out of onduidelijke fout (status 0, 408, 5xx) zoekt Thoth eerst
+ * in BC of het record met dat nummer al bestaat; zo ja, dan is dat het resultaat
+ * (recovered) en volgt er geen tweede POST. Zo nee, dan een fout zonder nieuwe
+ * poging. Bij een volgende goedkeuring controleert Thoth eerst de eerder
+ * gereserveerde nummers ($options['check_first']).
+ *
  * @param array<string, mixed> $payload BC-kolom => waarde (zonder nummer)
- * @return array{number:string, attempts:int, response:array}
+ * @param array{check_first?: list<string>, on_reserve?: callable(string):void} $options
+ * @return array{number:string, attempts:int, response:array, recovered:bool}
  */
-function thoth_bc_insert(array $config, string $environment, string $company, array $payload, ?int $year = null): array
+function thoth_bc_insert(array $config, string $environment, string $company, array $payload, ?int $year = null, array $options = []): array
 {
     $year ??= (int) date('Y');
     $auth = thoth_bc_auth_for_environment($environment);
+    $onReserve = $options['on_reserve'] ?? null;
     $lockPath = thoth_data_dir() . '/bc-insert-' . md5($environment . '|' . $company . '|' . $config['bc-tabel']) . '.lock';
     $lock = fopen($lockPath, 'c');
     if ($lock === false || !flock($lock, LOCK_EX)) {
         throw new ThothBcException('Kon de nummerlock niet krijgen.');
     }
     try {
+        $earlier = (array) ($options['check_first'] ?? []);
+        if ($earlier !== []) {
+            $hit = thoth_bc_find_reserved($config, $environment, $company, $payload, $earlier);
+            if ($hit !== null && $hit['matches']) {
+                return ['number' => $hit['number'], 'attempts' => 0, 'response' => $hit['row'], 'recovered' => true];
+            }
+        }
         $used = thoth_used_sequences($config, $year, thoth_bc_existing_numbers($config, $environment, $company, $year));
         $url = thoth_bc_entity_url($environment, $company, (string) $config['bc-tabel']);
         $lastError = '';
@@ -328,14 +401,34 @@ function thoth_bc_insert(array $config, string $environment, string $company, ar
                 throw new ThothBcException('Nummerreeks ' . thoth_number_stem($config, $year) . ' is vol (padding ' . $config['autoIncrementNumberPadding'] . ').');
             }
             $number = thoth_format_number($config, $year, $seq);
+            if (is_callable($onReserve)) {
+                $onReserve($number);
+            }
             $body = [$config['auto-increment-field'] => $number] + $payload;
-            $res = thoth_http('POST', $url, ['Accept: application/json', 'Content-Type: application/json'], json_encode($body, JSON_UNESCAPED_UNICODE), $auth);
+            try {
+                $res = thoth_http('POST', $url, ['Accept: application/json', 'Content-Type: application/json'], json_encode($body, JSON_UNESCAPED_UNICODE), $auth);
+            } catch (ThothBcException $e) {
+                $res = ['status' => 0, 'body' => $e->getMessage()];
+            }
             if ($res['status'] >= 200 && $res['status'] < 300) {
                 $json = json_decode($res['body'], true);
                 $returned = is_array($json) ? (string) ($json[$config['auto-increment-field']] ?? '') : '';
-                return ['number' => $returned !== '' ? $returned : $number, 'attempts' => $attempt, 'response' => is_array($json) ? $json : []];
+                return ['number' => $returned !== '' ? $returned : $number, 'attempts' => $attempt, 'response' => is_array($json) ? $json : [], 'recovered' => false];
             }
-            $lastError = thoth_bc_error_message($res['status'], $res['body']);
+            $lastError = $res['status'] === 0 ? 'Verbindingsfout of time-out: ' . $res['body'] : thoth_bc_error_message($res['status'], $res['body']);
+            if (thoth_bc_is_ambiguous_status($res['status'])) {
+                try {
+                    $hit = thoth_bc_find_reserved($config, $environment, $company, $payload, [$number]);
+                } catch (Throwable $checkError) {
+                    throw new ThothBcException('Onduidelijke fout bij aanmaken (' . $lastError . '). Controle in BC lukte ook niet (' . $checkError->getMessage() . '). Nummer ' . $number
+                        . ' is gereserveerd; bij opnieuw goedkeuren kijkt Thoth eerst of het record al bestaat.');
+                }
+                if ($hit !== null && $hit['matches']) {
+                    return ['number' => $hit['number'], 'attempts' => $attempt, 'response' => $hit['row'], 'recovered' => true];
+                }
+                throw new ThothBcException('Onduidelijke fout bij aanmaken (' . $lastError . '). Record ' . $number . ' bestaat (nog) niet in BC; er is geen tweede poging gedaan.'
+                    . ' Bij opnieuw goedkeuren kijkt Thoth eerst of ' . $number . ' alsnog is aangemaakt.', $res['status'], $res['body']);
+            }
             if (!thoth_bc_is_duplicate_error($res['status'], $res['body'])) {
                 throw new ThothBcException($lastError, $res['status'], $res['body']);
             }

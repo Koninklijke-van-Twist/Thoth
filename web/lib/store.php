@@ -81,8 +81,43 @@ function thoth_db(): PDO
         company TEXT NOT NULL DEFAULT \'\',
         environment TEXT NOT NULL DEFAULT \'\'
     )');
+    thoth_migrate($pdo);
 
     return $pdo;
+}
+
+/** Schemaversie in PRAGMA user_version; verhogen bij elke schemawijziging. */
+const THOTH_SCHEMA_VERSION = 1;
+
+/**
+ * Migraties in één BEGIN IMMEDIATE-transactie (les van Mímir): gelijktijdige
+ * requests na een deploy wachten op elkaar in plaats van allebei ALTER TABLE
+ * te doen ("duplicate column name"). Op de huidige versie draait er geen DDL.
+ */
+function thoth_migrate(PDO $pdo): void
+{
+    if ((int) $pdo->query('PRAGMA user_version')->fetchColumn() >= THOTH_SCHEMA_VERSION) {
+        return;
+    }
+    $pdo->exec('BEGIN IMMEDIATE');
+    try {
+        $version = (int) $pdo->query('PRAGMA user_version')->fetchColumn();
+        if ($version < 1) {
+            $cols = array_column($pdo->query('PRAGMA table_info(requests)')->fetchAll(), 'name');
+            if (!in_array('bc_reserved_json', $cols, true)) {
+                // Nummers die Thoth bij een onduidelijke BC-fout al naar BC stuurde.
+                $pdo->exec("ALTER TABLE requests ADD COLUMN bc_reserved_json TEXT NOT NULL DEFAULT '[]'");
+            }
+        }
+        $pdo->exec('PRAGMA user_version = ' . THOTH_SCHEMA_VERSION);
+        $pdo->exec('COMMIT');
+    } catch (Throwable $e) {
+        try {
+            $pdo->exec('ROLLBACK');
+        } catch (Throwable) {
+        }
+        throw $e;
+    }
 }
 
 function thoth_now(): string
@@ -98,6 +133,7 @@ function thoth_decode_request(?array $row): ?array
     $row['id'] = (int) $row['id'];
     $row['data'] = json_decode((string) $row['data_json'], true) ?: [];
     $row['labels'] = json_decode((string) $row['labels_json'], true) ?: [];
+    $row['bc_reserved'] = array_values(array_filter((array) (json_decode((string) ($row['bc_reserved_json'] ?? '[]'), true) ?: []), 'is_string'));
 
     return $row;
 }

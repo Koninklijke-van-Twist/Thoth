@@ -12,6 +12,9 @@ declare(strict_types=1);
  *  - invoerType "lookup" (of "combobox" met "strikt": true): strikte keuze uit BC,
  *    alleen een bestaande waarde mag worden opgeslagen en ingezonden.
  *  - "restricties": per veld, regels uit het register in validation.php (v2).
+ *  - "bcGeblokkeerd": "<melding>" op het hoogste niveau: aanmaken in BC kan (nog) niet,
+ *    bv. omdat een veld in BC niet bewerkbaar is. Indienen kan wel; goedkeuren faalt
+ *    dan vóór elke BC-call met deze melding en het verzoek blijft Ingediend.
  */
 
 const THOTH_TYPES = [
@@ -108,6 +111,12 @@ function thoth_validate_config(array $raw, string $source = 'config'): array
         $errors[] = '"autoIncrementStrategie" moet "eerste-vrije" of "max+1" zijn.';
     }
 
+    $blocked = $raw['bcGeblokkeerd'] ?? null;
+    if ($blocked !== null && (!is_string($blocked) || trim($blocked) === '')) {
+        $errors[] = '"bcGeblokkeerd" moet een niet-lege melding zijn (of weglaten).';
+        $blocked = null;
+    }
+
     $fields = $field('formFields');
     $normalized = [];
     $tables = [];
@@ -163,17 +172,17 @@ function thoth_validate_config(array $raw, string $source = 'config'): array
         if (array_key_exists('opties', $f)) {
             $options = thoth_normalize_options($f['opties'], $label, $errors);
         }
-        $source = null;
+        $optSource = null;
         if (array_key_exists('optiesBron', $f)) {
-            $source = thoth_normalize_option_source($f['optiesBron'], $label, $type, $errors);
+            $optSource = thoth_normalize_option_source($f['optiesBron'], $label, $type, $errors);
         }
-        if (in_array($type, ['dropdown', 'combobox'], true) && $options === null && $source === null) {
+        if (in_array($type, ['dropdown', 'combobox'], true) && $options === null && $optSource === null) {
             $errors[] = $label . ': ' . $type . ' heeft "opties" of "optiesBron" nodig.';
         }
-        if ($type === 'lookup' && $source === null) {
+        if ($type === 'lookup' && $optSource === null) {
             $errors[] = $label . ': lookup (strikte combobox) heeft "optiesBron" nodig.';
         }
-        if ($options !== null && $source !== null) {
+        if ($options !== null && $optSource !== null) {
             $errors[] = $label . ': gebruik "opties" of "optiesBron", niet allebei.';
         }
 
@@ -198,7 +207,7 @@ function thoth_validate_config(array $raw, string $source = 'config'): array
             'bc-kolom' => (string) $column,
             'verplicht' => ($f['verplicht'] ?? false) === true,
             'opties' => $options,
-            'optiesBron' => $source,
+            'optiesBron' => $optSource,
             'restricties' => $rules,
         ];
     }
@@ -221,6 +230,7 @@ function thoth_validate_config(array $raw, string $source = 'config'): array
         'bc-tabel' => (string) array_key_first($tables),
         'voorbeeld' => ($raw['_voorbeeld'] ?? null) !== null,
         'voorbeeldNotitie' => is_string($raw['_voorbeeld'] ?? null) ? $raw['_voorbeeld'] : '',
+        'bcGeblokkeerd' => is_string($blocked) ? trim($blocked) : null,
         'formFields' => $normalized,
     ];
 }

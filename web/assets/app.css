@@ -73,3 +73,4 @@ th { font-size: .85rem; color: var(--muted); font-weight: 600; }
   .card { padding: .8rem; }
   th:nth-child(4), td:nth-child(4), th:nth-child(7), td:nth-child(7) { display: none; }
 }
+.own-request-note { margin: 8px 0 0; padding: 8px 10px; border-left: 3px solid #c58a00; background: #fff8e6; }

@@ -1,20 +1,172 @@
 {
-  "_voorbeeld": "VOORBEELD: verzonnen velden en webservicenamen. Tim levert de echte config; vervang dit bestand en verwijder _voorbeeld.",
+  "_bron": "Echte BC-webservice LVS_MainEntityCard = page 11333009 'LVS_Main Entity Card' op tabel 11332937 'LVS_Main Entity' (BC page 810 + Pagina-inspectie, 08-10-2026). Velden en lengtes uit Mímir-metadata kvtmdlive_aad (09-10-2026); bewerkbaarheid uit OData-$metadata (AllowEdit). Nummer: ME1 + jaar + 5 cijfers (bv. ME12600054).",
+  "_todo": "1) Thoth kiest zelf het nummer, maar ME-nummers komen in BC uit een nummerreeks: de 'Laatst gebruikt' van die reeks loopt niet mee, dus een BC-gebruiker kan daarna een 'bestaat al'-fout krijgen. Afspreken met KVT (reeks bijwerken of eigen reeks). 2) Bill_to_Customer_No vult BC zelf uit het factuurcontact (niet sturen). 3) Super_Entity_Code en VAT_Bus_Posting_Group bewust weggelaten: hun BC-tabellen zijn niet als webservice gepubliceerd, dus geen betrouwbare keuzelijst.",
   "auto-increment-field": "No",
-  "autoIncrementPrefix": "SL1",
+  "autoIncrementPrefix": "ME1",
   "autoIncrementNumberPadding": 5,
   "autoIncrementPrefixYear": true,
+  "autoIncrementStrategie": "max+1",
   "formFields": [
-    {"name": "Naam", "placeholder": "Bijv. Gemaal De Hoek", "invoerType": "tekst", "bc-tabel": "VOORBEELD_ServiceLocations", "bc-kolom": "Name", "verplicht": true},
-    {"name": "Adres", "placeholder": "Straat en huisnummer", "invoerType": "tekst", "bc-tabel": "VOORBEELD_ServiceLocations", "bc-kolom": "Address", "verplicht": true},
-    {"name": "Postcode", "placeholder": "1234 AB", "invoerType": "tekst", "bc-tabel": "VOORBEELD_ServiceLocations", "bc-kolom": "Post_Code", "verplicht": true},
-    {"name": "Plaats", "placeholder": "Plaats", "invoerType": "tekst", "bc-tabel": "VOORBEELD_ServiceLocations", "bc-kolom": "City", "verplicht": true},
-    {"name": "Klant", "placeholder": "Zoek op klantnummer of naam", "invoerType": "lookup", "bc-tabel": "VOORBEELD_ServiceLocations", "bc-kolom": "Customer_No", "verplicht": true,
-      "optiesBron": {"bc-tabel": "VOORBEELD_Customers", "waarde-kolom": "No", "label-kolommen": ["Name", "City"], "zoek-kolommen": ["No", "Name", "City"]}},
-    {"name": "Type locatie", "placeholder": "", "invoerType": "dropdown", "bc-tabel": "VOORBEELD_ServiceLocations", "bc-kolom": "Location_Type", "verplicht": false,
-      "opties": [{"waarde": "Pumping_Station", "label": "Gemaal", "aliassen": ["Gemaal"]}, {"waarde": "Ship", "label": "Schip", "aliassen": ["Schip"]}, {"waarde": "Plant", "label": "Installatie", "aliassen": ["Installatie"]}]},
-    {"name": "Contactpersoon", "placeholder": "Naam contactpersoon", "invoerType": "combobox", "bc-tabel": "VOORBEELD_ServiceLocations", "bc-kolom": "Contact", "verplicht": false,
-      "opties": ["Bedrijfsleider", "Machinist", "Technische dienst"]},
-    {"name": "In gebruik sinds", "placeholder": "", "invoerType": "date", "bc-tabel": "VOORBEELD_ServiceLocations", "bc-kolom": "Starting_Date", "verplicht": false}
+    {
+      "name": "Servicelocatienaam",
+      "placeholder": "Bijv. Flora Aalsmeer RFH gebouw C010",
+      "invoerType": "tekst",
+      "bc-tabel": "LVS_MainEntityCard",
+      "bc-kolom": "Description",
+      "verplicht": true
+    },
+    {
+      "name": "Omschrijving 2",
+      "placeholder": "Optioneel (max 100 tekens)",
+      "invoerType": "tekst",
+      "bc-tabel": "LVS_MainEntityCard",
+      "bc-kolom": "KVT_Description_2",
+      "verplicht": false
+    },
+    {
+      "name": "Factureren aan contact",
+      "placeholder": "Zoek op contactnr., naam, bedrijf, plaats of klantnr.",
+      "invoerType": "lookup",
+      "bc-tabel": "LVS_MainEntityCard",
+      "bc-kolom": "Bill_to_Contact_No",
+      "verplicht": true,
+      "optiesBron": {
+        "bc-tabel": "Contacts",
+        "waarde-kolom": "No",
+        "label-kolommen": [
+          "Name",
+          "Company_Name",
+          "LVS_City"
+        ],
+        "zoek-kolommen": [
+          "No",
+          "Name",
+          "Company_Name",
+          "LVS_City",
+          "KVT_Customer_No"
+        ],
+        "filter": "KVT_Customer_No ne ''"
+      }
+    },
+    {
+      "name": "Adres",
+      "placeholder": "Straat en huisnummer",
+      "invoerType": "tekst",
+      "bc-tabel": "LVS_MainEntityCard",
+      "bc-kolom": "KVT_Address",
+      "verplicht": true
+    },
+    {
+      "name": "Adres 2",
+      "placeholder": "Optioneel (max 50 tekens)",
+      "invoerType": "tekst",
+      "bc-tabel": "LVS_MainEntityCard",
+      "bc-kolom": "KVT_Address_2",
+      "verplicht": false
+    },
+    {
+      "name": "Postcode",
+      "placeholder": "Bijv. 2371 TS",
+      "invoerType": "tekst",
+      "bc-tabel": "LVS_MainEntityCard",
+      "bc-kolom": "KVT_Post_Code",
+      "verplicht": true
+    },
+    {
+      "name": "Plaats",
+      "placeholder": "Bijv. Roelofarendsveen",
+      "invoerType": "tekst",
+      "bc-tabel": "LVS_MainEntityCard",
+      "bc-kolom": "KVT_City",
+      "verplicht": true
+    },
+    {
+      "name": "Land/regio",
+      "placeholder": "",
+      "invoerType": "dropdown",
+      "bc-tabel": "LVS_MainEntityCard",
+      "bc-kolom": "KVT_Country_Region_Code",
+      "verplicht": true,
+      "opties": [
+        {
+          "waarde": "NL",
+          "label": "NL – Nederland"
+        },
+        {
+          "waarde": "BE",
+          "label": "BE – België"
+        },
+        {
+          "waarde": "DE",
+          "label": "DE – Duitsland"
+        },
+        {
+          "waarde": "IT",
+          "label": "IT – Italië"
+        },
+        {
+          "waarde": "FI",
+          "label": "FI – Finland"
+        },
+        {
+          "waarde": "PL",
+          "label": "PL – Polen"
+        }
+      ]
+    },
+    {
+      "name": "Taal",
+      "placeholder": "",
+      "invoerType": "dropdown",
+      "bc-tabel": "LVS_MainEntityCard",
+      "bc-kolom": "KVT_Language_Code",
+      "verplicht": false,
+      "optiesBron": {
+        "bc-tabel": "AppLanguages",
+        "waarde-kolom": "Code",
+        "label-kolommen": [
+          "Name"
+        ]
+      }
+    },
+    {
+      "name": "Taal servicerapport",
+      "placeholder": "",
+      "invoerType": "dropdown",
+      "bc-tabel": "LVS_MainEntityCard",
+      "bc-kolom": "KVT_Language_Service_Report",
+      "verplicht": false,
+      "optiesBron": {
+        "bc-tabel": "AppLanguages",
+        "waarde-kolom": "Code",
+        "label-kolommen": [
+          "Name"
+        ]
+      }
+    },
+    {
+      "name": "Breedtegraad [DD]",
+      "placeholder": "Bijv. 52.15547 (punt, geen komma)",
+      "invoerType": "tekst",
+      "bc-tabel": "LVS_MainEntityCard",
+      "bc-kolom": "KVT_Latitude_Coordinate__x005B_DD_x005D_",
+      "verplicht": false
+    },
+    {
+      "name": "Lengtegraad [DD]",
+      "placeholder": "Bijv. 4.63421 (punt, geen komma)",
+      "invoerType": "tekst",
+      "bc-tabel": "LVS_MainEntityCard",
+      "bc-kolom": "KVT_Longitude_Coordinate__x005B_DD_x005D_",
+      "verplicht": false
+    },
+    {
+      "name": "Veiligheidstekst",
+      "placeholder": "Optioneel (max 250 tekens)",
+      "invoerType": "tekst",
+      "bc-tabel": "LVS_MainEntityCard",
+      "bc-kolom": "KVT_Safety_Text",
+      "verplicht": false
+    }
   ]
 }

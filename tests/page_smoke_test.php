@@ -51,13 +51,14 @@ check($csrf !== '', 'CSRF-token in formulier');
 
 [$s, $body] = http('GET', 'verzoek.php?type=servicelocatie');
 check_same(200, $s, 'nieuw formulier laadt');
-check(str_contains($body, 'Voorbeeldconfig') && str_contains($body, 'Inzenden'), 'voorbeeldwaarschuwing en inzendknop');
+check(!str_contains($body, 'Voorbeeldconfig') && str_contains($body, 'Inzenden') && str_contains($body, 'Servicelocatienaam'), 'echte config zonder voorbeeldwaarschuwing, met inzendknop');
 [$s, $body] = http('GET', 'verzoek.php?type=component');
 check(str_contains($body, 'data-strikt="1"'), 'component heeft strikte lookup');
+check(str_contains($body, 'Aanmaken in BC kan nog niet'), 'component toont blokkade-melding');
 
 [$s, $body] = http('POST', 'api.php', ['actie' => 'opslaan', 'type' => 'servicelocatie', 'v' => ['Name' => 'Test']]);
 check_same(400, $s, 'autosave zonder CSRF geweigerd');
-[$s, $body] = http('POST', 'api.php', ['actie' => 'opslaan', 'csrf' => $csrf, 'type' => 'servicelocatie', 'bedrijf' => 'kvtmdlive_aad|Koninklijke van Twist', 'v' => ['Name' => '<script>x</script>']]);
+[$s, $body] = http('POST', 'api.php', ['actie' => 'opslaan', 'csrf' => $csrf, 'type' => 'servicelocatie', 'bedrijf' => 'kvtmdlive_aad|Koninklijke van Twist', 'v' => ['Description' => '<script>x</script>']]);
 $json = json_decode($body, true);
 check_same(200, $s, 'autosave ok');
 check(($json['ok'] ?? false) && preg_match('/^\d{2}:\d{2}:\d{2}$/', (string) ($json['opgeslagen'] ?? '')) === 1, 'Opgeslagen hh:mm:ss');
@@ -66,10 +67,10 @@ $id = (int) ($json['id'] ?? 0);
 check(str_contains($body, '&lt;script&gt;x&lt;/script&gt;') && !str_contains($body, '<script>x</script>'), 'output ge-escaped');
 check(str_contains($body, 'Historie'), 'historie zichtbaar');
 
-[$s, $body] = http('POST', 'verzoek.php?id=' . $id, ['actie' => 'indienen', 'csrf' => $csrf, 'id' => $id, 'bedrijf' => 'kvtmdlive_aad|Koninklijke van Twist', 'v' => ['Name' => 'Test']]);
+[$s, $body] = http('POST', 'verzoek.php?id=' . $id, ['actie' => 'indienen', 'csrf' => $csrf, 'id' => $id, 'bedrijf' => 'kvtmdlive_aad|Koninklijke van Twist', 'v' => ['Description' => 'Test']]);
 check(str_contains($body, 'Nog niet ingediend'), 'indienen geweigerd zolang verplichte velden leeg zijn');
 
-[$s, $body] = http('GET', 'api.php?actie=zoek&type=component&veld=Service_Location_No&bedrijf=' . rawurlencode('kvtmdlive_aad|Koninklijke van Twist') . '&q=x');
+[$s, $body] = http('GET', 'api.php?actie=zoek&type=component&veld=Main_Entity&bedrijf=' . rawurlencode('kvtmdlive_aad|Koninklijke van Twist') . '&q=x');
 $json = json_decode($body, true);
 check(isset($json['ok']), 'zoek-endpoint geeft JSON (' . $s . ')');
 

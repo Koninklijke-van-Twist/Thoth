@@ -111,4 +111,57 @@ check(!thoth_can_view($concept, 'gert@kvt.nl'), 'goedkeurder ziet andermans conc
 check(!thoth_can_view($concept, 'bob@kvt.nl'), 'collega ziet andermans concept niet');
 check(thoth_can_view(thoth_get_request($comp['id']), 'gert@kvt.nl'), 'goedkeurder ziet ingediend verzoek');
 
+// Eigen aanvraag: goedkeurder mag die niet goedkeuren of afwijzen
+$GLOBALS['thothLookupChecker'] = static fn (array $field, string $value): bool => $value === 'SL12600001';
+$own = thoth_save_draft(null, 'servicelocatie', 'gert@kvt.nl', ['Name' => 'Eigen gemaal'], [], 'Koninklijke van Twist', 'kvtmdlive_aad');
+check_same([], thoth_submit($own['id'], 'gert@kvt.nl'), 'goedkeurder mag zelf wel aanvragen');
+$ownReq = thoth_get_request($own['id']);
+check(!thoth_can_decide($ownReq, 'GERT@kvt.nl'), 'eigen aanvraag: niet beslissen (hoofdletterongevoelig)');
+$called = false;
+check_throws(fn () => thoth_approve($own['id'], 'Gert@KVT.nl', static function () use (&$called) { $called = true; return ['number' => 'X']; }), 'eigen aanvraag', 'eigen aanvraag niet goedkeuren');
+check(!$called, 'eigen aanvraag: geen BC-call');
+check_throws(fn () => thoth_reject($own['id'], 'gert@kvt.nl', 'zelf'), 'eigen aanvraag', 'eigen aanvraag niet afwijzen');
+check_same(THOTH_STATUS_SUBMITTED, thoth_get_request($own['id'])['status'], 'eigen aanvraag blijft Ingediend');
+$GLOBALS['approvers'][] = 'anna@kvt.nl';
+check(thoth_can_decide($ownReq, 'anna@kvt.nl'), 'andere goedkeurder mag wel');
+
+// Time-out: gereserveerd nummer wordt bewaard en bij opnieuw goedkeuren eerst gecontroleerd
+$seenOptions = null;
+$res = thoth_approve($own['id'], 'anna@kvt.nl', static function (array $cfg, string $env, string $company, array $payload, array $options) {
+    $options['on_reserve']('SL12600077');
+    throw new ThothBcException('Onduidelijke fout bij aanmaken (time-out). Record SL12600077 bestaat (nog) niet in BC.');
+});
+check(!$res['ok'], 'time-out: niet goedgekeurd');
+check_same(['SL12600077'], thoth_get_request($own['id'])['bc_reserved'], 'gereserveerd nummer bewaard');
+$res = thoth_approve($own['id'], 'anna@kvt.nl', static function (array $cfg, string $env, string $company, array $payload, array $options) use (&$seenOptions) {
+    $seenOptions = $options;
+    return ['number' => 'SL12600077', 'recovered' => true];
+});
+check($res['ok'] && $seenOptions['check_first'] === ['SL12600077'], 'opnieuw goedkeuren geeft gereserveerde nummers mee');
+$ownHist = thoth_history($own['id']);
+check(str_contains((string) end($ownHist)['reason'], 'teruggevonden'), 'historie meldt herstel na time-out');
+array_pop($GLOBALS['approvers']);
+
+// bcGeblokkeerd: indienen mag, goedkeuren faalt netjes vóór elke BC-call
+$cfgFile = getenv('THOTH_CONFIG_DIR') . '/component-config.json';
+$origCfg = (string) file_get_contents($cfgFile);
+$blockedCfg = json_decode($origCfg, true);
+$blockedCfg['bcGeblokkeerd'] = 'Main_Entity is in BC nog niet bewerkbaar.';
+file_put_contents($cfgFile, json_encode($blockedCfg));
+touch($cfgFile, time() + 5); // nieuwe mtime, geen memo
+clearstatcache();
+$GLOBALS['thothLookupChecker'] = static fn (array $field, string $value): bool => $value === 'SL12600001';
+$blk = thoth_save_draft(null, 'component', 'bob@kvt.nl', ['Name' => 'Motor', 'SL_No' => 'SL12600001'], [], 'Koninklijke van Twist', 'kvtmdlive_aad');
+check_same([], thoth_submit($blk['id'], 'bob@kvt.nl'), 'geblokkeerd type kan wel worden ingediend');
+$called = false;
+$res = thoth_approve($blk['id'], 'gert@kvt.nl', static function () use (&$called) { $called = true; return ['number' => 'X']; });
+check(!$res['ok'] && !$called, 'geblokkeerd: geen BC-call');
+check(str_contains($res['error'], 'Main_Entity is in BC nog niet bewerkbaar'), 'duidelijke melding');
+check_same(THOTH_STATUS_SUBMITTED, thoth_get_request($blk['id'])['status'], 'geblokkeerd: blijft Ingediend');
+check(str_contains((string) thoth_get_request($blk['id'])['bc_error'], 'geblokkeerd'), 'melding als bc_error zichtbaar');
+check_throws(fn () => thoth_validate_config(array_replace($blockedCfg, ['bcGeblokkeerd' => ''])), 'bcGeblokkeerd', 'lege blokkade-melding geweigerd');
+file_put_contents($cfgFile, $origCfg);
+touch($cfgFile, time() + 10);
+clearstatcache();
+
 finish('workflow');

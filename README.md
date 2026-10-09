@@ -9,7 +9,7 @@ Pagina-root: `web/`. PHP 8.4, SQLite, geen externe dependencies.
 | Stap | Wie | Wat |
 |---|---|---|
 | Indienen | gebruiker in `$allowedUsers` | Opent een formulier (Servicelocatie of Component). Wijzigingen worden debounced (1 s) server-side als **Concept** opgeslagen, met de melding "Opgeslagen hh:mm:ss". **Inzenden** kan pas als alle verplichte velden gevuld zijn en aan de restricties is voldaan (de server controleert opnieuw). Status wordt **Ingediend**. |
-| Goedkeuren | gebruiker in `$approvers` (en `$allowedUsers`) | Ziet alle ingediende verzoeken. **Goedkeuren** maakt het record direct in BC aan via OData (POST); status **Goedgekeurd** en het BC-nummer wordt bewaard. Mislukt de insert, dan blijft het **Ingediend** met de BC-foutmelding zichtbaar voor de goedkeurder. **Afwijzen** kan met een optionele reden. |
+| Goedkeuren | gebruiker in `$approvers` (en `$allowedUsers`) | Ziet alle ingediende verzoeken. Een goedkeurder beoordeelt **nooit zijn eigen aanvraag** (server-side, e-mail hoofdletterongevoelig; de knoppen zijn dan verborgen met uitleg). **Goedkeuren** maakt het record direct in BC aan via OData (POST); status **Goedgekeurd** en het BC-nummer wordt bewaard. Mislukt de insert, dan blijft het **Ingediend** met de BC-foutmelding zichtbaar voor de goedkeurder. **Afwijzen** kan met een optionele reden. |
 | Afgewezen | aanvrager | Blijft **Afgewezen**, staat apart bovenaan *Mijn verzoeken* met de reden, en is net als een Concept te bewerken en opnieuw in te dienen. |
 
 Statusovergangen: `Concept → Ingediend`, `Afgewezen → Ingediend`, `Ingediend → Goedgekeurd | Afgewezen`. Goedgekeurd is eindstatus. Elke overgang komt in de statushistorie (wie, wanneer, van, naar, reden).
@@ -67,19 +67,37 @@ Uitbreidingen (optioneel, niet in Tims formaat):
 
 De config wordt bij het laden gevalideerd; fouten verschijnen als duidelijke lijst op het formulier.
 
-> **Let op:** de meegeleverde configs zijn **voorbeelden** met verzonnen webservices (`VOORBEELD_…`). Tim levert de echte configs.
+- `"bcGeblokkeerd": "melding"` (hoogste niveau) – aanmaken in BC kan (nog) niet. Het formulier toont de melding, indienen kan wel, en goedkeuren faalt vóór elke BC-call met deze melding (het verzoek blijft Ingediend). Weghalen zodra BC zover is.
+- `"_bron"` / `"_todo"` – documentatie in de config, wordt genegeerd.
+
+### Echte configs (9-10-2026)
+
+| Formulier | Webservice | BC-pagina / tabel | Nummer |
+|---|---|---|---|
+| Servicelocatie | `LVS_MainEntityCard` | page 11333009 *LVS_Main Entity Card* / tabel 11332937 | `ME1` + jaar + 5 cijfers, bv. `ME12600055` |
+| Component | `AppComponentCard` | page 11332880 *LVS_Component Card* (Componentkaart) / tabel 11332871 | `COM10` + 5 cijfers, geen jaar, bv. `COM1002172` |
+
+Beide gebruiken `max+1` (geen gaten opvullen: verwijderde nummers als ME12600003 komen dan niet terug).
+
+- **Servicelocatie:** `Description` (naam, verplicht), `KVT_Description_2`, `Bill_to_Contact_No` (strikte lookup op `Contacts` met `KVT_Customer_No ne ''`, verplicht; BC leidt `Bill_to_Customer_No` er zelf van af), `KVT_Address`, `KVT_Post_Code`, `KVT_City` (verplicht), `KVT_Address_2`, `KVT_Country_Region_Code` (NL/BE/DE/IT/FI/PL, verplicht), `KVT_Language_Code` en `KVT_Language_Service_Report` (uit `AppLanguages`), coördinaten (`KVT_Latitude_Coordinate__x005B_DD_x005D_`, `KVT_Longitude_…`) en `KVT_Safety_Text`.
+- **Component:** `Main_Entity` (strikte lookup op `LVS_MainEntityCard`), `Sub_Entity` (Equipmentsoort, de 44 codes die in KVT voorkomen), `Description`, `Serial_No` (verplicht; `NOG NIET BEKEND` als het onbekend is), `Description_2`, `Manufacturer_Code` (suggesties), `Manufacturer_Model`, `Software_Version`, `Date_of_Installation`.
+- **Component is geblokkeerd** (`bcGeblokkeerd`): `Main_Entity` is op `AppComponentCard` niet bewerkbaar (AllowEdit/AllowEditOnCreate=false). De LVS-partner wordt gevraagd dat aan te passen. Daarna `bcGeblokkeerd` weghalen en eerst op `kvtfat_aad` testen.
+- **Nummerreeks-risico:** ME- en COM-nummers komen in BC uit een nummerreeks. Thoth kiest zelf het volgende nummer; de *laatst gebruikte* van de BC-reeks loopt niet mee, waardoor een BC-gebruiker daarna een "bestaat al"-fout kan krijgen. Afspreken met KVT.
+- Niet op het formulier: `Super_Entity_Code`, `VAT_Bus_Posting_Group`, contactnummers van eigenaar/bouwer (BC-tabellen niet gepubliceerd of zelden gebruikt) en draaiuren (alleen-lezen).
 
 ### Nummering bij goedkeuren
 
 1. Lock (bestandslock per environment/bedrijf/tabel) zodat twee goedkeuringen tegelijk niet hetzelfde nummer pakken; daarnaast een lock per verzoek tegen dubbel goedkeuren.
 2. Bestaande nummers met prefix+jaar vers uit BC: `$filter=startswith(No,'SL126')` (direct OData, geen cache).
 3. **Eerste vrije**: laagste ongebruikte volgnummer vanaf 1 in dat jaar (gaten worden opgevuld). Omzetten naar max+1: `THOTH_NUMBER_STRATEGY_DEFAULT` in `web/lib/config.php` (één regel) of per config `"autoIncrementStrategie": "max+1"`.
-4. Eén POST met alle velden. Geeft BC een duplicate/conflict (409, "already exists", "bestaat al"), dan het volgende vrije nummer, maximaal 4 pogingen. Andere fouten: geen retry, melding naar de goedkeurder.
+4. Vóór de POST wordt het nummer bij het verzoek bewaard (`bc_reserved_json`).
+5. Eén POST met alle velden. Geeft BC een duplicate/conflict (409, "already exists", "bestaat al"), dan het volgende vrije nummer, maximaal 4 pogingen. Andere fouten: geen retry, melding naar de goedkeurder.
+6. **Time-outveilig:** bij een time-out, verbindingsfout, 408 of 5xx zoekt Thoth direct in BC (zelfde auth, geen cache) naar het gereserveerde nummer. Bestaat het record en komen de tekstvelden overeen, dan wordt het verzoek Goedgekeurd met dat nummer, zonder tweede POST. Zo niet, dan een fout zonder nieuwe poging. Bij opnieuw goedkeuren controleert Thoth eerst de eerder gereserveerde nummers, voor het geval BC het record later toch heeft aangemaakt. Een record van iemand anders op dat nummer (andere velden) telt niet als het onze.
 
 ## Bedrijf en environments
 
 - Dropdown met de BC-bedrijvenlijst via Mímir `companies.php` over alle environments (terugval: per environment in `$auth_list` direct `…/ODataV4/Company`), 24 uur gecachet in `web/data/companies.json`.
-- Testomgevingen (`kvtfat_aad`, `kvtfat2_aad`) staan in de lijst met "(test: …)" erachter; live (`kvtmdlive_aad`, `kvtgermanylive_aad`) bovenaan.
+- Mímir kent alleen de live-environments; environments uit `$auth_list` die Mímir niet teruggeeft (`kvtfat_aad`, `kvtfat2_aad`) haalt Thoth direct op. Testomgevingen staan in de lijst met "(test: …)" erachter; live (`kvtmdlive_aad`, `kvtgermanylive_aad`) bovenaan.
 - De keuze wordt per gebruiker onthouden; elk verzoek slaat **bedrijf én environment** op. BC-auth komt uit `$auth_list[<environment van het verzoek>]`, nooit uit de volgorde van `$auth_list`.
 - Lezen gaat via Mímir. Geeft Mímir voor een bedrijf een ander environment terug dan het verzoek (testbedrijf met dezelfde naam), dan leest Thoth direct via OData.
 - Schrijven gaat direct via BC OData, volgens het patroon van Calculus (`BcAutomation::requestJson`): `POST {baseUrl}{environment}/ODataV4/Company('{bedrijf}')/{webservice}` met `Accept`/`Content-Type: application/json`, basic of NTLM.
@@ -87,7 +105,7 @@ De config wordt bij het laden gevalideerd; fouten verschijnen als duidelijke lij
 
 ## Datamodel (`web/data/thoth.sqlite`)
 
-- `requests`: `id, type, owner, company, environment, status, data_json, labels_json, bc_number, bc_error, reject_reason, created_at, updated_at, submitted_at, decided_by, decided_at`
+- `requests`: `id, type, owner, company, environment, status, data_json, labels_json, bc_number, bc_error, reject_reason, created_at, updated_at, submitted_at, decided_by, decided_at, bc_reserved_json` (schemaversie in `PRAGMA user_version`, migratie in één `BEGIN IMMEDIATE`)
 - `status_history`: `id, request_id, actor, from_status, to_status, reason, at`
 - `user_prefs`: `email, company, environment`
 
@@ -109,9 +127,14 @@ Tests (PHP CLI, zoals bij Consus): `numbering_test.php` (padding, jaar, eerste v
 
 ## Deploy
 
-Nog **geen** workflow in de repo. Eerst moet de repo-secret `FTP_REMOTE_DIR` bestaan (bv. `/var/www/html/thoth`), naast `FTP_HOST`, `FTP_USERNAME` en `FTP_PASSWORD`. Daarna `.github/workflows/deploy-ftp.yml` toevoegen (gebaseerd op Consus): bij push op `master` spiegelt lftp `web/` naar `FTP_REMOTE_DIR`, met uitzondering van `.htaccess`, `auth.php`, `cfg.php` en de runtime-map `data/`; daarna best-effort `chmod 777 data`.
+`.github/workflows/deploy-ftp.yml` (patroon Consus/Mímir/Asclepius): bij elke push op `master` spiegelt lftp `web/` naar de repo-secret `FTP_REMOTE_DIR` (bewaakt: alleen `/var/www/html/<map>`), met `FTP_HOST`, `FTP_USERNAME` en `FTP_PASSWORD`.
+
+- Bestanden krijgen op de runner 644 (mappen 755) en de mirror draait zonder `--no-perms`, zodat Apache de PHP kan lezen.
+- **Nooit aangeraakt** (niet geüpload, niet verwijderd): `auth.php`, `cfg.php`, `.htpasswd`, de root-`.htaccess` en de runtime-map `data/` (SQLite, `companies.json`, locks). `data` staat er als mapnode én als `data/` met slash én als `data/**` (les van Mímir PR #10: zonder de slash ruimt `--delete` de map alsnog op). Lokaal getest met `lftp file://`.
+- `lib/.htaccess` en `config/.htaccess` gaan wél mee; Thoth zet `data/.htaccess` zelf neer.
+- Daarna best-effort `chmod 777` op `data/` en de sqlite-bestanden (een 550 maakt de job niet rood) en een rooktest op `https://sleutels.kvt.nl/thoth/` en `data/thoth.sqlite` (moet 403/404 zijn).
 
 Eerste keer op de server:
-1. `web/auth.php` plaatsen (zie boven).
-2. Controleren dat `data/` schrijfbaar is voor PHP en dat `https://sleutels.kvt.nl/thoth/data/thoth.sqlite` een 403 geeft.
-3. De echte configs in `web/config/` zetten (via git).
+1. `web/auth.php` plaatsen (zie boven), met `kvtfat_aad` in `$auth_list` voor de eerste test.
+2. Eventueel de root-`.htaccess` uit `web/.htaccess` handmatig plaatsen (de deploy laat de root-`.htaccess` van de server ongemoeid).
+3. Controleren dat `data/` schrijfbaar is voor PHP en dat `https://sleutels.kvt.nl/thoth/data/thoth.sqlite` een 403 geeft.

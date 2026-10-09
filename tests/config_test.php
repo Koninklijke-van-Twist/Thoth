@@ -42,14 +42,21 @@ check_same('lookup', $strict['formFields'][0]['invoerType'], 'combobox strikt wo
 check_same(['Name'], $strict['formFields'][0]['optiesBron']['label-kolommen'], 'label-kolom als enkelvoud');
 check_same(['No', 'Name'], $strict['formFields'][0]['optiesBron']['zoek-kolommen'], 'zoek-kolommen standaard waarde + labels');
 
-// De meegeleverde voorbeeldconfigs moeten geldig zijn.
+// De meegeleverde (echte) configs moeten geldig zijn.
 putenv('THOTH_CONFIG_DIR');
 foreach (array_keys(THOTH_TYPES) as $type) {
     $cfg = thoth_load_config($type);
     check($cfg['formFields'] !== [], "voorbeeldconfig $type laadt");
 }
 $component = thoth_config_fields_by_key(thoth_load_config('component'));
-check_same('lookup', $component['Service_Location_No']['invoerType'] ?? null, 'Component hangt via strikte lookup aan een servicelocatie');
+check_same('lookup', $component['Main_Entity']['invoerType'] ?? null, 'Component hangt via strikte lookup aan een servicelocatie');
+check_same('LVS_MainEntityCard', $component['Main_Entity']['optiesBron']['bc-tabel'] ?? null, 'lookup op de echte servicelocatie-webservice');
+$slCfg = thoth_load_config('servicelocatie');
+$coCfg = thoth_load_config('component');
+check_same(['LVS_MainEntityCard', 'ME12600008', false], [$slCfg['bc-tabel'], thoth_format_number($slCfg, 2026, 8), $slCfg['voorbeeld']], 'servicelocatie: echte webservice, ME1-nummer, geen voorbeeld');
+check_same(['AppComponentCard', 'COM1002172'], [$coCfg['bc-tabel'], thoth_format_number($coCfg, 2026, 2172)], 'component: echte webservice, COM10-nummer');
+check($coCfg['bcGeblokkeerd'] !== null && str_contains($coCfg['bcGeblokkeerd'], 'Main_Entity'), 'component geblokkeerd tot Main_Entity bewerkbaar is');
+check($slCfg['bcGeblokkeerd'] === null, 'servicelocatie niet geblokkeerd');
 
 // Restrictie-hook: een regel uit het register werkt per veld.
 $GLOBALS['thothFieldRules'] = ['maxLengte' => static fn ($v, $f, $ctx, $rule) => mb_strlen((string) $v) > (int) $rule['waarde'] ? 'is te lang.' : null];

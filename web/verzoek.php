@@ -86,6 +86,7 @@ thoth_header(($request ? 'Verzoek #' . $request['id'] : 'Nieuwe ' . strtolower(t
   <div class="flash flash-error"><strong>Config-fout</strong><br><?= nl2br(h($configError)) ?></div>
 <?php else: ?>
   <?php if ($config['voorbeeld']): ?><div class="flash flash-warn">Voorbeeldconfig: <?= h($config['voorbeeldNotitie']) ?></div><?php endif; ?>
+  <?php if ($config['bcGeblokkeerd'] !== null): ?><div class="flash flash-warn"><strong>Aanmaken in BC kan nog niet.</strong> <?= h($config['bcGeblokkeerd']) ?></div><?php endif; ?>
   <?php if ($request && $request['status'] === THOTH_STATUS_REJECTED): ?>
     <div class="flash flash-warn">Afgewezen door <?= h($request['decided_by']) ?>. Reden: <?= $request['reject_reason'] !== null ? h($request['reject_reason']) : '<em>geen reden opgegeven</em>' ?>. Pas het verzoek aan en dien het opnieuw in.</div>
   <?php endif; ?>
@@ -182,6 +183,9 @@ thoth_header(($request ? 'Verzoek #' . $request['id'] : 'Nieuwe ' . strtolower(t
     <section class="card approve-box">
       <h2>Beoordelen</h2>
       <p class="muted">Aanvrager: <?= h($request['owner']) ?> · Bedrijf: <?= h($request['company']) ?> (<?= h($request['environment']) ?>) · BC-tabel: <?= h($config['bc-tabel']) ?></p>
+      <?php if (!thoth_can_decide($request, $thothUser)): ?>
+      <p class="own-request-note">Dit is je eigen aanvraag. Een andere goedkeurder moet hem goedkeuren of afwijzen.</p>
+      <?php else: ?>
       <form method="post" class="inline">
         <?= thoth_csrf_field() ?><input type="hidden" name="id" value="<?= (int) $request['id'] ?>">
         <button type="submit" name="actie" value="goedkeuren" class="btn btn-ok">Goedkeuren en aanmaken in BC</button>
@@ -192,6 +196,7 @@ thoth_header(($request ? 'Verzoek #' . $request['id'] : 'Nieuwe ' . strtolower(t
         <textarea id="reden" name="reden" rows="2" maxlength="2000"></textarea>
         <button type="submit" name="actie" value="afwijzen" class="btn btn-danger">Afwijzen</button>
       </form>
+      <?php endif; ?>
     </section>
   <?php endif; ?>
 

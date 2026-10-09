@@ -59,6 +59,12 @@ function thoth_is_owner(array $request, string $email): bool
     return strtolower((string) $request['owner']) === strtolower(trim($email));
 }
 
+/** Een goedkeurder beoordeelt nooit zijn eigen aanvraag (e-mail hoofdletterongevoelig). */
+function thoth_can_decide(array $request, string $email): bool
+{
+    return thoth_is_approver($email) && !thoth_is_owner($request, $email);
+}
+
 function thoth_can_edit(array $request, string $email): bool
 {
     return thoth_is_owner($request, $email)
@@ -162,6 +168,10 @@ function thoth_reject(int $id, string $approver, string $reason): void
     if (!thoth_is_approver($approver)) {
         throw new ThothActionException('Alleen goedkeurders mogen afwijzen.');
     }
+    $own = thoth_get_request($id);
+    if ($own !== null && thoth_is_owner($own, $approver)) {
+        throw new ThothActionException('Je kunt je eigen aanvraag niet afwijzen; een andere goedkeurder moet hem beoordelen.');
+    }
     $reason = mb_substr(trim($reason), 0, 2000);
     $st = thoth_db()->prepare('UPDATE requests SET status = ?, reject_reason = ?, decided_by = ?, decided_at = ?, updated_at = ? WHERE id = ? AND status = ?');
     $st->execute([THOTH_STATUS_REJECTED, $reason !== '' ? $reason : null, strtolower($approver), thoth_now(), thoth_now(), $id, THOTH_STATUS_SUBMITTED]);
@@ -182,7 +192,8 @@ function thoth_approve(int $id, string $approver, ?callable $inserter = null): a
     if (!thoth_is_approver($approver)) {
         throw new ThothActionException('Alleen goedkeurders mogen goedkeuren.');
     }
-    $inserter ??= 'thoth_bc_insert';
+    $inserter ??= static fn (array $c, string $env, string $company, array $payload, array $options): array
+        => thoth_bc_insert($c, $env, $company, $payload, null, $options);
     $lock = fopen(thoth_data_dir() . '/approve-' . $id . '.lock', 'c');
     if ($lock === false || !flock($lock, LOCK_EX | LOCK_NB)) {
         throw new ThothActionException('Dit verzoek wordt op dit moment al goedgekeurd.');
@@ -192,7 +203,15 @@ function thoth_approve(int $id, string $approver, ?callable $inserter = null): a
         if ($request === null || $request['status'] !== THOTH_STATUS_SUBMITTED) {
             throw new ThothActionException('Alleen ingediende verzoeken kunnen worden goedgekeurd.');
         }
+        if (thoth_is_owner($request, $approver)) {
+            throw new ThothActionException('Je kunt je eigen aanvraag niet goedkeuren; een andere goedkeurder moet hem beoordelen.');
+        }
         $config = thoth_load_config($request['type']);
+        if ($config['bcGeblokkeerd'] !== null) {
+            $msg = 'Aanmaken in BC geblokkeerd: ' . $config['bcGeblokkeerd'];
+            thoth_record_bc_error($id, $msg);
+            return ['ok' => false, 'error' => $msg];
+        }
         $context = thoth_request_context($request, 'goedkeuren');
         try {
             $fieldErrors = thoth_validate_values($config, $request['data'], $context);
@@ -202,7 +221,18 @@ function thoth_approve(int $id, string $approver, ?callable $inserter = null): a
                 return ['ok' => false, 'error' => $msg, 'fields' => $fieldErrors];
             }
             $payload = thoth_build_bc_payload($config, $request['data'], $context);
-            $result = $inserter($config, (string) $request['environment'], (string) $request['company'], $payload);
+            $reserved = $request['bc_reserved'];
+            $options = [
+                'check_first' => $reserved,
+                'on_reserve' => static function (string $number) use ($id, &$reserved): void {
+                    if (!in_array($number, $reserved, true)) {
+                        $reserved[] = $number;
+                        thoth_db()->prepare('UPDATE requests SET bc_reserved_json = ? WHERE id = ?')
+                            ->execute([json_encode(array_slice($reserved, -20)), $id]);
+                    }
+                },
+            ];
+            $result = $inserter($config, (string) $request['environment'], (string) $request['company'], $payload, $options);
         } catch (Throwable $e) {
             $msg = 'Aanmaken in BC mislukt: ' . $e->getMessage();
             thoth_record_bc_error($id, $msg);
@@ -211,7 +241,8 @@ function thoth_approve(int $id, string $approver, ?callable $inserter = null): a
         $number = (string) $result['number'];
         thoth_db()->prepare('UPDATE requests SET status = ?, bc_number = ?, bc_error = NULL, decided_by = ?, decided_at = ?, updated_at = ? WHERE id = ? AND status = ?')
             ->execute([THOTH_STATUS_APPROVED, $number, strtolower($approver), thoth_now(), thoth_now(), $id, THOTH_STATUS_SUBMITTED]);
-        thoth_add_history($id, strtolower($approver), THOTH_STATUS_SUBMITTED, THOTH_STATUS_APPROVED, 'BC-nummer ' . $number);
+        thoth_add_history($id, strtolower($approver), THOTH_STATUS_SUBMITTED, THOTH_STATUS_APPROVED, 'BC-nummer ' . $number
+            . (($result['recovered'] ?? false) ? ' (na time-out teruggevonden in BC, geen tweede POST)' : ''));
 
         return ['ok' => true, 'number' => $number];
     } finally {

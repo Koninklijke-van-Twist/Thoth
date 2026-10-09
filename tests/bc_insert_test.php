@@ -126,4 +126,90 @@ check_same(['SL12600002'], array_column(thoth_search_options($field, 'enschede',
 check_same('SL12600001 · Gemaal De Hoek', thoth_search_options($field, '00001', $ctx)[0]['label'], 'label uit label-kolommen');
 check(thoth_lookup_exists($field, 'SL12600002', $ctx + ['moment' => 'goedkeuren']), 'lookup bestaat');
 
+// 12. Bedrijvenlijst: Mímir (alleen live) aangevuld met test-environments uit $auth_list
+$GLOBALS['mimirApi'] = 'mimir_test';
+$calls = [];
+$GLOBALS['thothHttpClient'] = static function (string $method, string $url, array $headers, ?string $body, ?array $auth) use (&$calls): array {
+    $calls[] = $url;
+    if (str_contains($url, 'companies.php')) {
+        return ['status' => 200, 'body' => json_encode(['value' => [['name' => 'Koninklijke van Twist', 'environment' => 'kvtmdlive_aad']]])];
+    }
+    return ['status' => 200, 'body' => json_encode(['value' => [['Name' => 'Koninklijke van Twist']]])];
+};
+$found = thoth_bc_discover_companies();
+check_same([['name' => 'Koninklijke van Twist', 'environment' => 'kvtmdlive_aad'], ['name' => 'Koninklijke van Twist', 'environment' => 'kvtfat_aad']], $found, 'testbedrijf uit kvtfat_aad erbij');
+check(!in_array(true, array_map(static fn ($u) => str_contains($u, '/kvtmdlive_aad/ODataV4/Company'), $calls), true), 'live-environment niet dubbel direct opgevraagd');
+unset($GLOBALS['mimirApi']);
+
+// 13. Time-outveilig: na een time-out eerst in BC zoeken, geen tweede POST
+$bcRecords = ['SL12600001' => ['No' => 'SL12600001', 'Name' => 'Oud']];
+$posts = 0;
+$gets = [];
+$postMode = 'timeout-created';
+$GLOBALS['thothHttpClient'] = static function (string $method, string $url, array $headers, ?string $body, ?array $auth) use (&$bcRecords, &$posts, &$gets, &$postMode): array {
+    if ($method === 'GET') {
+        $q = rawurldecode($url);
+        $gets[] = $q;
+        $rows = [];
+        foreach ($bcRecords as $no => $row) {
+            if (str_contains($q, "startswith(No,'SL126')") || str_contains($q, "No eq '" . $no . "'")) {
+                $rows[] = $row;
+            }
+        }
+        return ['status' => 200, 'body' => json_encode(['value' => $rows])];
+    }
+    $posts++;
+    $rec = json_decode((string) $body, true);
+    if ($postMode === 'timeout-created') {
+        $bcRecords[$rec['No']] = $rec; // BC maakte het wél aan
+        throw new ThothBcException('Verbindingsfout: Operation timed out after 120000 milliseconds');
+    }
+    if ($postMode === 'timeout-not-created') {
+        throw new ThothBcException('Verbindingsfout: Operation timed out');
+    }
+    if ($postMode === '504-created-later') {
+        return ['status' => 504, 'body' => 'Gateway Timeout'];
+    }
+    $bcRecords[$rec['No']] = $rec;
+    return ['status' => 201, 'body' => json_encode($rec)];
+};
+$reservedSeen = [];
+$opts = ['on_reserve' => static function (string $n) use (&$reservedSeen) { $reservedSeen[] = $n; }];
+$res = thoth_bc_insert($c, 'kvtmdlive_aad', 'K', ['Name' => 'Gemaal Oost'], 2026, $opts);
+check_same('SL12600002', $res['number'], 'time-out maar record bestaat: nummer uit BC');
+check($res['recovered'], 'recovered gemarkeerd');
+check_same(1, $posts, 'geen tweede POST na time-out');
+check_same(['SL12600002'], $reservedSeen, 'nummer gereserveerd vóór de POST');
+check(str_contains(end($gets), "No eq 'SL12600002'"), 'controle op het gereserveerde nummer');
+
+// Time-out en record bestaat niet: fout, geen nieuwe poging
+$posts = 0;
+$postMode = 'timeout-not-created';
+check_throws(fn () => thoth_bc_insert($c, 'kvtmdlive_aad', 'K', ['Name' => 'Gemaal Zuid'], 2026), 'geen tweede poging', 'time-out zonder record: duidelijke fout');
+check_same(1, $posts, 'time-out zonder record: maar één POST');
+
+// 504, record verschijnt later; volgende goedkeuring vindt het via check_first
+$posts = 0;
+$postMode = '504-created-later';
+check_throws(fn () => thoth_bc_insert($c, 'kvtmdlive_aad', 'K', ['Name' => 'Schip West'], 2026), 'SL12600003', '504: melding met gereserveerd nummer');
+$bcRecords['SL12600003'] = ['No' => 'SL12600003', 'Name' => 'SCHIP WEST']; // BC verwerkte het toch
+$postMode = 'ok';
+$posts = 0;
+$res = thoth_bc_insert($c, 'kvtmdlive_aad', 'K', ['Name' => 'Schip West'], 2026, ['check_first' => ['SL12600003']]);
+check_same(['SL12600003', true, 0], [$res['number'], $res['recovered'], $posts], 'opnieuw goedkeuren: eerst gereserveerd nummer gecontroleerd, geen POST');
+
+// Gereserveerd nummer is intussen door iemand anders gebruikt (andere velden): wel nieuwe POST
+$bcRecords['SL12600004'] = ['No' => 'SL12600004', 'Name' => 'Iets anders'];
+$res = thoth_bc_insert($c, 'kvtmdlive_aad', 'K', ['Name' => 'Gemaal Noord'], 2026, ['check_first' => ['SL12600004']]);
+check(!$res['recovered'] && $res['number'] === 'SL12600005' && $posts === 1, 'vreemd record op gereserveerd nummer telt niet als het onze');
+
+// 400 blijft een gewone fout zonder zoekactie
+$GLOBALS['thothHttpClient'] = static function (string $method) use (&$gets): array {
+    $gets[] = $method;
+    return $method === 'GET' ? ['status' => 200, 'body' => '{"value":[]}'] : ['status' => 400, 'body' => '{"error":{"message":"Veld ongeldig"}}'];
+};
+$gets = [];
+check_throws(fn () => thoth_bc_insert($c, 'kvtmdlive_aad', 'K', ['Name' => 'X'], 2026), 'Veld ongeldig', '400 direct als fout');
+check_same(['GET', 'POST'], $gets, '400: geen extra zoekactie');
+
 finish('bc_insert');
