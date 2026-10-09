@@ -80,6 +80,7 @@ function thoth_validate_values(array $config, array $values, array $context): ar
     $errors = [];
     $typeRules = thoth_input_type_rules();
     $registry = thoth_field_rule_registry();
+    $context['values'] = $values; // voor afhankelijke lookups (optiesBron.afhankelijkVan)
     foreach ($config['formFields'] as $field) {
         $key = $field['key'];
         $value = $values[$key] ?? null;
@@ -236,10 +237,19 @@ function thoth_lookup_exists(array $field, string $value, array $context): bool
     if ($src['filter'] !== '') {
         $filter = '(' . $src['filter'] . ') and ' . $filter;
     }
+    // Afhankelijk (bv. model bij producent): de rij moet ook bij de gekozen bovenliggende waarde horen
+    // (leeg = alleen rijen zonder waarde in die kolom).
+    $dep = $src['afhankelijkVan'] ?? null;
+    $parent = $dep !== null ? trim((string) ($context['values'][$dep['veld']] ?? '')) : null;
+    if ($dep !== null) {
+        $filter .= ' and ' . $dep['kolom'] . " eq '" . thoth_odata_quote($parent) . "'";
+    }
     $maxAge = ($context['moment'] ?? '') === 'goedkeuren' ? 0 : 600;
-    $rows = thoth_bc_read((string) ($context['environment'] ?? ''), (string) $context['company'], $src['bc-tabel'], [$src['waarde-kolom']], $filter, $maxAge);
+    $select = $dep !== null ? [$src['waarde-kolom'], $dep['kolom']] : [$src['waarde-kolom']];
+    $rows = thoth_bc_read((string) ($context['environment'] ?? ''), (string) $context['company'], $src['bc-tabel'], $select, $filter, $maxAge);
     foreach ($rows as $row) {
-        if (thoth_same_value((string) ($row[$src['waarde-kolom']] ?? ''), $value)) {
+        if (thoth_same_value((string) ($row[$src['waarde-kolom']] ?? ''), $value)
+            && ($dep === null || thoth_same_value((string) ($row[$dep['kolom']] ?? ''), (string) $parent))) {
             return true;
         }
     }
@@ -272,7 +282,11 @@ function thoth_search_options(array $field, string $query, array $context, int $
                 continue 2;
             }
         }
-        $out[] = ['waarde' => $opt['waarde'], 'label' => $opt['label']];
+        $item = ['waarde' => $opt['waarde'], 'label' => $opt['label']];
+        if ($depCol !== null) {
+            $item['ouder'] = trim((string) ($opt['row'][$depCol] ?? '')); // JS vult zo nodig het bovenliggende veld
+        }
+        $out[] = $item;
         if (count($out) >= $limit) {
             break;
         }
@@ -311,14 +325,26 @@ function thoth_resolve_derived(array $config, array $values, array $context): ar
         if ($src['bc-tabel'] === null) {
             $values[$key] = ($field['maxLengte'] ?? null) !== null ? mb_substr($keyValue, 0, $field['maxLengte']) : $keyValue;
         } elseif ($keyValue !== '') {
-            $memoKey = $src['bc-tabel'] . '|' . $src['sleutel-kolom'] . '|' . $src['kolom'] . '|' . mb_strtolower($keyValue);
+            $extra = [];
+            foreach ($src['extraSleutels'] ?? [] as $col => $formKey) {
+                $extra[$col] = trim((string) ($values[$formKey] ?? ''));
+            }
+            $memoKey = $src['bc-tabel'] . '|' . $src['sleutel-kolom'] . '|' . $src['kolom'] . '|' . mb_strtolower($keyValue) . '|' . mb_strtolower(json_encode($extra));
             if (!array_key_exists($memoKey, $memo)) {
                 $filter = $src['sleutel-kolom'] . " eq '" . thoth_odata_quote($keyValue) . "'";
+                foreach ($extra as $col => $v) {
+                    $filter .= ' and ' . $col . " eq '" . thoth_odata_quote($v) . "'";
+                }
                 $rows = is_callable($reader)
                     ? $reader($src, $filter, $context)
-                    : thoth_bc_read((string) ($context['environment'] ?? ''), (string) ($context['company'] ?? ''), $src['bc-tabel'], [$src['sleutel-kolom'], $src['kolom']], $filter, 0);
+                    : thoth_bc_read((string) ($context['environment'] ?? ''), (string) ($context['company'] ?? ''), $src['bc-tabel'], array_values(array_unique(array_merge([$src['sleutel-kolom'], $src['kolom']], array_keys($extra)))), $filter, 0);
                 $memo[$memoKey] = null;
                 foreach ($rows as $row) {
+                    foreach ($extra as $col => $v) {
+                        if (!thoth_same_value((string) ($row[$col] ?? ''), $v)) {
+                            continue 2;
+                        }
+                    }
                     if (thoth_same_value((string) ($row[$src['sleutel-kolom']] ?? ''), $keyValue)) {
                         $memo[$memoKey] = $row;
                         break;
@@ -331,6 +357,9 @@ function thoth_resolve_derived(array $config, array $values, array $context): ar
                 continue;
             }
             $value = trim((string) ($row[$src['kolom']] ?? ''));
+            if ($value === '' && ($src['terugvalOpSleutel'] ?? false)) {
+                $value = $keyValue;
+            }
             if (($field['maxLengte'] ?? null) !== null) {
                 $value = mb_substr($value, 0, $field['maxLengte']);
             }

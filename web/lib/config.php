@@ -18,6 +18,8 @@ declare(strict_types=1);
  *      record in "bc-tabel" waarvan "sleutel-kolom" gelijk is aan de waarde van formulierveld "veld"
  *      (een bc-kolom van dit formulier). Bv. coördinaten uit de gekozen servicelocatie.
  *      Alleen {"veld"}: kopie van de waarde van dat formulierveld (afgekapt op maxLengte).
+ *      Optioneel "extraSleutels": {"<kolom>": "<formulierveld>"} (samengestelde sleutel, bv. producent
+ *      + model) en "terugvalOpSleutel": true (lege kolom → de sleutelwaarde zelf).
  *  - optiesBron."afhankelijkVan": {"veld", "kolom"}: suggesties alleen uit rijen waarvan
  *      "kolom" gelijk is aan de huidige waarde van formulierveld "veld" (leeg = geen filter).
  *  - "overschrijfbaar": true bij een automatisch veld: de gebruiker mag zelf een waarde zetten
@@ -245,6 +247,9 @@ function thoth_validate_config(array $raw, string $source = 'config'): array
         $refs = [];
         if ($nf['afgeleidVan'] !== null) {
             $refs['afgeleidVan'] = $nf['afgeleidVan']['veld'];
+            foreach ($nf['afgeleidVan']['extraSleutels'] as $col => $formKey) {
+                $refs['afgeleidVan.extraSleutels.' . $col] = $formKey;
+            }
         }
         if (($nf['optiesBron']['afhankelijkVan'] ?? null) !== null) {
             $refs['optiesBron.afhankelijkVan'] = $nf['optiesBron']['afhankelijkVan']['veld'];
@@ -436,7 +441,30 @@ function thoth_normalize_derived(mixed $src, string $label, array &$errors): ?ar
         $out[$k] = $v;
     }
 
-    return $out + ['bc-tabel' => null, 'sleutel-kolom' => null, 'kolom' => null];
+    $extra = $src['extraSleutels'] ?? [];
+    if ($out !== [] && isset($out['bc-tabel'])) {
+        if (!is_array($extra) || ($extra !== [] && array_is_list($extra))) {
+            $errors[] = $label . ': afgeleidVan."extraSleutels" moet {"<kolom in bc-tabel>": "<formulierveld>"} zijn.';
+            $extra = [];
+        }
+        foreach ($extra as $col => $formKey) {
+            if (!is_string($col) || !thoth_is_identifier($col) || !is_string($formKey) || !thoth_is_identifier($formKey)) {
+                $errors[] = $label . ': afgeleidVan."extraSleutels" bevat een ongeldige kolom of veld.';
+                $extra = [];
+                break;
+            }
+        }
+    } elseif ($extra !== []) {
+        $errors[] = $label . ': afgeleidVan."extraSleutels" kan alleen met "bc-tabel".';
+        $extra = [];
+    }
+    $fallback = $src['terugvalOpSleutel'] ?? false;
+    if (!is_bool($fallback)) {
+        $errors[] = $label . ': afgeleidVan."terugvalOpSleutel" moet true of false zijn.';
+        $fallback = false;
+    }
+
+    return $out + ['bc-tabel' => null, 'sleutel-kolom' => null, 'kolom' => null, 'extraSleutels' => $extra, 'terugvalOpSleutel' => $fallback];
 }
 
 /** @return array<string, array> velden op key */

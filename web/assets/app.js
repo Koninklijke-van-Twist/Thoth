@@ -79,6 +79,37 @@
     scheduleSave();
   });
 
+  // Afhankelijke keuzelijsten (bv. model bij producent): wijzigt de bovenliggende keuze, dan vervalt de onderliggende.
+  function clearChildren(veld) {
+    form.querySelectorAll('[data-combo][data-ouder="' + veld + '"]').forEach(function (child) {
+      var input = child.querySelector('.combo-input');
+      var valueEl = child.querySelector('.combo-value');
+      var labelEl = child.querySelector('.combo-label');
+      if (valueEl && valueEl.value) { valueEl.value = ''; }
+      if (labelEl) { labelEl.value = ''; }
+      if (input && input.value) { input.value = ''; }
+      clearChildren(child.dataset.veld);
+    });
+  }
+
+  // Kies je een onderliggende waarde terwijl de bovenliggende nog leeg is, dan wordt die ingevuld.
+  function fillParent(veld, value) {
+    var parent = form.querySelector('[data-combo][data-veld="' + veld + '"]');
+    if (!parent || !value) { return; }
+    var input = parent.querySelector('.combo-input');
+    var valueEl = parent.querySelector('.combo-value');
+    var labelEl = parent.querySelector('.combo-label');
+    if (valueEl) {
+      if (valueEl.value) { return; }
+      valueEl.value = value;
+      if (labelEl) { labelEl.value = value; }
+    } else if (input.value) {
+      return;
+    }
+    input.value = value;
+    parent.classList.remove('invalid');
+  }
+
   // Combobox (vrije tekst + suggesties) en lookup (strikt: alleen een gekozen bestaande waarde).
   form.querySelectorAll('[data-combo]').forEach(function (combo) {
     var input = combo.querySelector('.combo-input');
@@ -92,6 +123,9 @@
     function close() { list.hidden = true; list.innerHTML = ''; }
 
     function choose(item) {
+      var before = strict ? valueEl.value : input.value;
+      if (before !== item.waarde) { clearChildren(combo.dataset.veld); }
+      if (combo.dataset.ouder && item.ouder) { fillParent(combo.dataset.ouder, item.ouder); }
       if (strict) {
         valueEl.value = item.waarde;
         labelEl.value = item.label;
@@ -137,6 +171,7 @@
     input.addEventListener('input', function () {
       if (strict) {
         // Getypte tekst is nog geen keuze: waarde wissen tot er gekozen is.
+        if (valueEl.value) { clearChildren(combo.dataset.veld); }
         valueEl.value = '';
         labelEl.value = '';
         combo.classList.add('invalid');
