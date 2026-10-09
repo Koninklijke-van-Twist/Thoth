@@ -12,7 +12,7 @@ if (!thoth_is_approver($thothUser)) {
     exit;
 }
 
-$submitted = thoth_list_requests('status = ?', [THOTH_STATUS_SUBMITTED], 'submitted_at ASC');
+$submitted = thoth_list_requests('status IN (?, ?)', [THOTH_STATUS_SUBMITTED, THOTH_STATUS_PROCESSING], 'submitted_at ASC');
 $recent = thoth_list_requests('status IN (?, ?)', [THOTH_STATUS_APPROVED, THOTH_STATUS_REJECTED], 'decided_at DESC LIMIT 25');
 
 thoth_header('Goedkeuren', 'goedkeuren');

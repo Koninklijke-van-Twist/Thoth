@@ -60,6 +60,7 @@ function thoth_status_pill(string $status): string
     $class = match ($status) {
         THOTH_STATUS_CONCEPT => 'concept',
         THOTH_STATUS_SUBMITTED => 'ingediend',
+        THOTH_STATUS_PROCESSING => 'behandeling',
         THOTH_STATUS_APPROVED => 'goedgekeurd',
         THOTH_STATUS_REJECTED => 'afgewezen',
         default => '',
