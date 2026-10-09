@@ -1,0 +1,17 @@
+# Serverconfig met secrets. Nooit committen.
+web/auth.php
+web/cfg.php
+auth.php
+cfg.php
+
+# Runtime-data (SQLite, caches, locks). De toegangsblokkade blijft in git.
+web/data/*
+!web/data/.gitkeep
+!web/data/.htaccess
+web/cache/
+
+# OS-rommel
+.DS_Store
+Thumbs.db
+*~
+*.swp

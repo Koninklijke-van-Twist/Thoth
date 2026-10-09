@@ -1,0 +1,125 @@
+name: Deploy to FTP on master push
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install lftp
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lftp
+
+      - name: Debug env
+        run: |
+          echo "Host: $FTP_HOST"
+          echo "User: $FTP_USERNAME"
+          # echo "Pass: $FTP_PASSWORD"  # liever niet loggen 😉
+          echo "Remote dir: $FTP_REMOTE_DIR"
+        env:
+          FTP_HOST: ${{ secrets.FTP_HOST }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+          FTP_REMOTE_DIR: ${{ secrets.FTP_REMOTE_DIR }}
+
+      - name: Guard FTP_REMOTE_DIR
+        env:
+          FTP_REMOTE_DIR: ${{ secrets.FTP_REMOTE_DIR }}
+        run: |
+          remote="${FTP_REMOTE_DIR%/}"
+          if [[ ! "$remote" =~ ^/var/www/html/[A-Za-z0-9._-]+$ ]] || [[ "$remote" == *..* ]]; then
+            echo "FTP_REMOTE_DIR geweigerd: verwacht bv. /var/www/html/thoth" >&2
+            exit 1
+          fi
+
+      # web/ spiegelen (patroon Consus/Mímir/Asclepius).
+      # - 755/644 op de runner en mirror zonder --no-perms, anders landt PHP als
+      #   600 (server-umask) en kan Apache het niet lezen.
+      # - Les van Mímir PR #10: de runtime-map data wordt uitgesloten als
+      #   mapnode (`data`, `data/`) én inhoud (`data/**`). Zonder de variant met
+      #   slash verwijdert --delete de map op de server alsnog. Daarmee blijven
+      #   thoth.sqlite, companies.json en locks onaangeroerd; Thoth zet
+      #   data/.htaccess zelf neer als die ontbreekt.
+      # - auth.php en cfg.php (secrets, alleen op de server) worden nooit
+      #   geüpload of verwijderd.
+      # - Alleen de root-.htaccess blijft van de server (regex op het relatieve
+      #   pad). lib/.htaccess en config/.htaccess gaan wél mee: die schermen de
+      #   code en formulierconfig af.
+      - name: Deploy web/ to FTP (with delete & excludes)
+        env:
+          FTP_HOST: ${{ secrets.FTP_HOST }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+          FTP_REMOTE_DIR: ${{ secrets.FTP_REMOTE_DIR }}
+        run: |
+          find ./web -type d -exec chmod 755 {} +
+          find ./web -type f -exec chmod 644 {} +
+
+          lftp -u "$FTP_USERNAME","$FTP_PASSWORD" "$FTP_HOST" << EOF
+          set cmd:fail-exit true
+          set net:max-retries 1
+          set net:timeout 20
+          set ftp:ssl-allow false
+          set ftp:passive-mode yes
+
+          cd "$FTP_REMOTE_DIR"
+
+          mirror -R --delete \
+            --exclude '^\.htaccess$' \
+            --exclude-glob .htpasswd \
+            --exclude-glob auth.php \
+            --exclude-glob cfg.php \
+            --exclude-glob data \
+            --exclude-glob data/ \
+            --exclude-glob data/** \
+            --exclude-glob cache \
+            --exclude-glob cache/ \
+            --exclude-glob cache/** \
+            ./web .
+
+          bye
+          EOF
+
+      # Best-effort, pas na een geslaagde mirror: aparte sessie met
+      # fail-exit false en `|| true`, zodat een 550 de deploy niet rood maakt.
+      # Nooit de data-map of de database overschrijven of verwijderen.
+      - name: chmod data and sqlite files (best-effort)
+        env:
+          FTP_HOST: ${{ secrets.FTP_HOST }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+          FTP_REMOTE_DIR: ${{ secrets.FTP_REMOTE_DIR }}
+        run: |
+          lftp -u "$FTP_USERNAME","$FTP_PASSWORD" "$FTP_HOST" << EOF || true
+          set cmd:fail-exit false
+          set net:max-retries 1
+          set net:timeout 20
+          set ftp:ssl-allow false
+          set ftp:passive-mode yes
+
+          cd "$FTP_REMOTE_DIR"
+
+          mkdir -p data
+          chmod 777 data
+          glob -a chmod 777 data/*.sqlite
+          glob -a chmod 777 data/*.sqlite-*
+
+          bye
+          EOF
+
+      # Rooktest: de pagina moet antwoorden (zonder auth.php: melding of 403/500).
+      - name: Smoke check
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' -m 30 https://sleutels.kvt.nl/thoth/ || true)
+          echo "https://sleutels.kvt.nl/thoth/ -> HTTP $code"
+          code=$(curl -s -o /dev/null -w '%{http_code}' -m 30 https://sleutels.kvt.nl/thoth/data/thoth.sqlite || true)
+          echo "data/thoth.sqlite -> HTTP $code (verwacht 403 of 404)"
+          if [ "$code" = "200" ]; then echo "::warning::data/thoth.sqlite is publiek bereikbaar"; fi
