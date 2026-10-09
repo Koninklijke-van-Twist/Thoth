@@ -88,5 +88,5 @@ function thoth_header(string $title, string $active = ''): void
 
 function thoth_footer(): void
 {
-    echo '</main><script src="assets/app.js?v=2"></script></body></html>';
+    echo '</main><script src="assets/app.js?v=3"></script></body></html>';
 }

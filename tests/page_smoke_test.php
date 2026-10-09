@@ -58,7 +58,8 @@ check(str_contains($body, 'Aanmaken in BC kan nog niet'), 'component toont blokk
 check(str_contains($body, 'automatisch overgenomen uit Servicelocatie (LVS_MainEntityCard)'), 'coördinaten tonen automatisch-hint');
 check(str_contains($body, 'maxlength="50"'), 'maxlength op tekstvelden');
 check(str_contains($body, 'data-ouder="Manufacturer_Code"'), 'model-suggesties afhankelijk van producent');
-check(str_contains($body, 'automatisch overgenomen uit Model producent.'), 'omschrijving 2 uit model');
+check(str_contains($body, 'automatisch overgenomen uit Model producent (KVT_LVS_Manufacturer_Model).'), 'omschrijving 2 uit modeltabel');
+check(substr_count($body, 'data-strikt="1"') === 4, 'servicelocatie, equipmentsoort, producent en model zijn strikt');
 check(str_contains($body, 'name="v[KVT_Latitude_Coordinate__x005B_DD_x005D_]" value="" readonly'), 'overschrijfbare coördinaat: readonly en ingestuurd');
 check(!str_contains($body, 'name="v[Description_2]"'), 'niet-overschrijfbaar automatisch veld wordt niet ingestuurd');
 check(str_contains($body, 'data-kaart-open') && str_contains($body, 'data-kaart-wis'), 'component: kaartknop en terug naar automatisch');

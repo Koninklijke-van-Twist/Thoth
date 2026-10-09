@@ -24,7 +24,7 @@ $fields = [
 ];
 $c = thoth_validate_config($base + ['formFields' => $fields]);
 check_same(10, $c['formFields'][1]['maxLengte'], 'maxLengte genormaliseerd');
-check_same(['veld' => 'Manufacturer_Model', 'bc-tabel' => null, 'sleutel-kolom' => null, 'kolom' => null], $c['formFields'][4]['afgeleidVan'], 'kopie uit formulierveld');
+check_same(['veld' => 'Manufacturer_Model', 'bc-tabel' => null, 'sleutel-kolom' => null, 'kolom' => null, 'extraSleutels' => [], 'terugvalOpSleutel' => false], $c['formFields'][4]['afgeleidVan'], 'kopie uit formulierveld');
 check_same('MEs', $c['formFields'][5]['afgeleidVan']['bc-tabel'], 'afgeleid uit BC-tabel');
 check_same(['veld' => 'Manufacturer_Code', 'kolom' => 'Manufacturer_Code'], $c['formFields'][3]['optiesBron']['afhankelijkVan'], 'afhankelijkVan');
 
@@ -109,6 +109,10 @@ foreach (['Description' => 100, 'Description_2' => 50, 'Serial_No' => 50, 'KVT_P
 check_same('LVS_MainEntityCard', $byKey['KVT_Latitude_Coordinate__x005B_DD_x005D_']['afgeleidVan']['bc-tabel'], 'breedtegraad uit servicelocatie');
 check_same('KVT_Longitude_Coordinate__x005B_DD_x005D_', $byKey['KVT_Longitude_Coordinate__x005B_DD_x005D_']['afgeleidVan']['kolom'], 'lengtegraad uit servicelocatie');
 check_same('Manufacturer_Code', $byKey['Manufacturer_Model']['optiesBron']['afhankelijkVan']['veld'], 'model gefilterd op producent');
+check_same(['lookup', 'lookup', 'lookup'], [$byKey['Sub_Entity']['invoerType'], $byKey['Manufacturer_Code']['invoerType'], $byKey['Manufacturer_Model']['invoerType']], 'strikte keuzelijsten uit BC');
+check_same(['KVT_LVS_Sub_Entity', 'KVT_Producenten', 'KVT_LVS_Manufacturer_Model'], [$byKey['Sub_Entity']['optiesBron']['bc-tabel'], $byKey['Manufacturer_Code']['optiesBron']['bc-tabel'], $byKey['Manufacturer_Model']['optiesBron']['bc-tabel']], 'gepubliceerde webservices');
+check_same("Code ne ''", $byKey['Manufacturer_Code']['optiesBron']['filter'], 'lege producent eruit');
+check_same(['KVT_LVS_Manufacturer_Model', 'Model_Code', 'Description', ['Manufacturer_Code' => 'Manufacturer_Code'], true], [$byKey['Description_2']['afgeleidVan']['bc-tabel'], $byKey['Description_2']['afgeleidVan']['sleutel-kolom'], $byKey['Description_2']['afgeleidVan']['kolom'], $byKey['Description_2']['afgeleidVan']['extraSleutels'], $byKey['Description_2']['afgeleidVan']['terugvalOpSleutel']], 'omschrijving 2 uit modeltabel, terugval op modelcode');
 check(!$byKey['KVT_Place_On_Location']['verplicht'] && !$byKey['Description_2']['verplicht'], 'optionele velden');
 
 finish('derived');
