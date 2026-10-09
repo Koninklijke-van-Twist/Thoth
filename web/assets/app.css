@@ -74,3 +74,16 @@ th { font-size: .85rem; color: var(--muted); font-weight: 600; }
   th:nth-child(4), td:nth-child(4), th:nth-child(7), td:nth-child(7) { display: none; }
 }
 .own-request-note { margin: 8px 0 0; padding: 8px 10px; border-left: 3px solid #c58a00; background: #fff8e6; }
+/* Kaartkiezer (OpenStreetMap + Leaflet, lokaal in assets/vendor/leaflet) */
+.btn-secondary { background: #fff; color: inherit; border: 1px solid var(--line); }
+.btn-link { background: none; border: none; color: inherit; text-decoration: underline; padding: .3rem .4rem; cursor: pointer; }
+.map-actions { display: flex; gap: .5rem; align-items: center; margin-top: .4rem; flex-wrap: wrap; }
+.auto-override[readonly] { background: #f6f8fa; }
+.map-dialog { width: min(900px, 96vw); max-height: 94vh; padding: 1rem; border: 1px solid var(--line); border-radius: 8px; }
+.map-dialog::backdrop { background: rgba(0,0,0,.4); }
+.map-head { display: flex; justify-content: space-between; align-items: center; }
+.map-head h2 { margin: 0; }
+.map-search { position: relative; margin: .6rem 0; }
+.map-search input { width: 100%; box-sizing: border-box; padding: .5rem .6rem; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+.map-search .combo-list { z-index: 1000; }
+.map-canvas { height: min(60vh, 480px); border: 1px solid var(--line); border-radius: 6px; }

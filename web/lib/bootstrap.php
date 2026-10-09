@@ -13,6 +13,7 @@ require_once __DIR__ . '/store.php';
 require_once __DIR__ . '/bc.php';
 require_once __DIR__ . '/validation.php';
 require_once __DIR__ . '/requests.php';
+require_once __DIR__ . '/geo.php';
 require_once __DIR__ . '/layout.php';
 
 $thothAuthFile = getenv('THOTH_AUTH_FILE') ?: __DIR__ . '/../auth.php';
@@ -35,3 +36,8 @@ if (!thoth_is_allowed($thothUser)) {
     echo 'Geen toegang.';
     exit;
 }
+
+// CSP: alles van Thoth zelf; alleen kaarttegels van OpenStreetMap (Nominatim loopt via api.php).
+// Referer meesturen naar de tegelserver is vereist volgens de OSM tile policy.
+header("Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://tile.openstreetmap.org; connect-src 'self'; form-action 'self'; frame-ancestors 'self'; base-uri 'self'; object-src 'none'");
+header('Referrer-Policy: strict-origin-when-cross-origin');

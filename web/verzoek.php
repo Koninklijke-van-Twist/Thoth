@@ -100,7 +100,22 @@ thoth_header(($request ? 'Verzoek #' . $request['id'] : 'Nieuwe ' . strtolower(t
     <div class="flash flash-error">Nog niet ingediend:<ul><?php foreach ($fieldErrors as $msg): ?><li><?= h($msg) ?></li><?php endforeach; ?></ul></div>
   <?php endif; ?>
 
-  <form method="post" class="card form" id="verzoek-form" data-type="<?= h($type) ?>" data-editable="<?= $editable ? '1' : '0' ?>" novalidate>
+  <?php
+    $mapPicker = $config['kaartKiezer'];
+    $mapButtonAfter = $mapPicker !== null ? ($mapPicker['adres'] ?? $mapPicker['lat']) : null;
+    $mapAttrs = '';
+    if ($mapPicker !== null) {
+        $mapCountries = [];
+        if (isset($mapPicker['land'])) {
+            foreach (thoth_field_options(thoth_config_fields_by_key($config)[$mapPicker['land']], $context) as $o) {
+                $mapCountries[] = strtoupper($o['waarde']);
+            }
+        }
+        $mapAttrs = ' data-kaart="' . h(json_encode(array_map(static fn ($k) => 'f_' . $k, $mapPicker))) . '" data-kaart-landen="' . h(implode(',', $mapCountries)) . '"';
+    }
+  ?>
+  <?php if ($mapPicker !== null): ?><link rel="stylesheet" href="assets/vendor/leaflet/leaflet.css?v=1.9.4"><?php endif; ?>
+  <form method="post" class="card form" id="verzoek-form" data-type="<?= h($type) ?>" data-editable="<?= $editable ? '1' : '0' ?>"<?= $mapAttrs ?> novalidate>
     <?= thoth_csrf_field() ?>
     <input type="hidden" name="id" value="<?= $request ? (int) $request['id'] : '' ?>">
     <input type="hidden" name="type" value="<?= h($type) ?>">
@@ -164,16 +179,31 @@ thoth_header(($request ? 'Verzoek #' . $request['id'] : 'Nieuwe ' . strtolower(t
           </div>
         <?php break;
             case 'automatisch':
-                $srcField = thoth_config_fields_by_key($config)[$field['afgeleidVan']['veld']] ?? null; ?>
+                $srcField = thoth_config_fields_by_key($config)[$field['afgeleidVan']['veld']] ?? null;
+                $srcText = ($srcField['name'] ?? $field['afgeleidVan']['veld']) . ($field['afgeleidVan']['bc-tabel'] !== null ? ' (' . $field['afgeleidVan']['bc-tabel'] . ')' : '');
+                if ($field['overschrijfbaar']): ?>
+          <input type="text" id="<?= h($inputId) ?>" name="<?= h($name) ?>" value="<?= h($value) ?>" readonly class="auto-override"
+            placeholder="<?= h($editable ? 'Automatisch uit ' . ($srcField['name'] ?? $field['afgeleidVan']['veld']) : '') ?>"<?= $maxAttr . $dis ?>>
+          <div class="hint">Leeg = bij goedkeuren automatisch overgenomen uit <?= h($srcText) ?>. Met 'Kies op kaart' kun je het overschrijven.</div>
+                <?php else: ?>
           <input type="text" id="<?= h($inputId) ?>" value="<?= h($value) ?>" readonly disabled placeholder="Automatisch">
-          <div class="hint">Wordt bij goedkeuren automatisch overgenomen uit <?= h(($srcField['name'] ?? $field['afgeleidVan']['veld']) . ($field['afgeleidVan']['bc-tabel'] !== null ? ' (' . $field['afgeleidVan']['bc-tabel'] . ')' : '')) ?>.</div>
-        <?php break;
+          <div class="hint">Wordt bij goedkeuren automatisch overgenomen uit <?= h($srcText) ?>.</div>
+                <?php endif;
+                break;
             default:
                 $htmlType = ['date' => 'date', 'time' => 'time', 'datetime' => 'datetime-local'][$field['invoerType']] ?? 'text'; ?>
           <input type="<?= $htmlType ?>" id="<?= h($inputId) ?>" name="<?= h($name) ?>" value="<?= h($value) ?>" placeholder="<?= h($field['placeholder']) ?>"
             <?= $field['invoerType'] === 'nummer' ? 'inputmode="decimal"' : '' ?><?= $maxAttr . $req . $dis ?>>
         <?php endswitch; ?>
         <?php if (isset($fieldErrors[$key])): ?><div class="error-inline"><?= h($fieldErrors[$key]) ?></div><?php endif; ?>
+        <?php if ($editable && $key === $mapButtonAfter): ?>
+          <div class="map-actions">
+            <button type="button" class="btn btn-secondary" data-kaart-open>Kies op kaart</button>
+            <?php if (thoth_config_fields_by_key($config)[$mapPicker['lat']]['overschrijfbaar']): ?>
+              <button type="button" class="btn btn-link" data-kaart-wis>Coördinaten weer automatisch</button>
+            <?php endif; ?>
+          </div>
+        <?php endif; ?>
       </div>
     <?php endforeach; ?>
 
@@ -217,6 +247,26 @@ thoth_header(($request ? 'Verzoek #' . $request['id'] : 'Nieuwe ' . strtolower(t
       <?php endforeach; ?>
       </ul>
     </section>
+  <?php endif; ?>
+  <?php if ($editable && $mapPicker !== null): ?>
+  <dialog id="kaart-dialog" class="map-dialog" aria-labelledby="kaart-titel">
+    <div class="map-head">
+      <h2 id="kaart-titel">Kies een locatie</h2>
+      <button type="button" class="btn btn-link" data-kaart-sluit aria-label="Sluiten">✕</button>
+    </div>
+    <div class="map-search">
+      <input type="search" id="kaart-zoek" placeholder="Zoek een adres of plaats (OpenStreetMap)" autocomplete="off">
+      <ul id="kaart-resultaten" class="combo-list" role="listbox" hidden></ul>
+    </div>
+    <div id="kaart" class="map-canvas"></div>
+    <p id="kaart-status" class="muted" aria-live="polite">Zoek een adres, of klik op de kaart. Je kunt de marker verslepen.</p>
+    <div class="form-actions">
+      <button type="button" class="btn btn-secondary" data-kaart-sluit>Annuleren</button>
+      <button type="button" class="btn" id="kaart-overnemen" disabled>Overnemen</button>
+    </div>
+  </dialog>
+  <script src="assets/vendor/leaflet/leaflet.js?v=1.9.4"></script>
+  <script src="assets/kaart.js?v=1"></script>
   <?php endif; ?>
 <?php endif; ?>
 <?php thoth_footer();

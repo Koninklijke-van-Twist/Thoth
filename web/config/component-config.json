@@ -7,6 +7,10 @@
   "autoIncrementNumberPadding": 5,
   "autoIncrementPrefixYear": false,
   "autoIncrementStrategie": "max+1",
+  "kaartKiezer": {
+    "lat": "KVT_Latitude_Coordinate__x005B_DD_x005D_",
+    "lon": "KVT_Longitude_Coordinate__x005B_DD_x005D_"
+  },
   "formFields": [
     {
       "name": "Servicelocatie",
@@ -194,7 +198,8 @@
         "bc-tabel": "LVS_MainEntityCard",
         "sleutel-kolom": "No",
         "kolom": "KVT_Latitude_Coordinate__x005B_DD_x005D_"
-      }
+      },
+      "overschrijfbaar": true
     },
     {
       "name": "Lengtegraad",
@@ -209,7 +214,8 @@
         "bc-tabel": "LVS_MainEntityCard",
         "sleutel-kolom": "No",
         "kolom": "KVT_Longitude_Coordinate__x005B_DD_x005D_"
-      }
+      },
+      "overschrijfbaar": true
     },
     {
       "name": "Plaatsing op locatie",
