@@ -67,6 +67,9 @@ Uitbreidingen (optioneel, niet in Tims formaat):
 
 De config wordt bij het laden gevalideerd; fouten verschijnen als duidelijke lijst op het formulier.
 
+- `"maxLengte": 50` (per veld) – maximaal aantal tekens, gelijk aan de BC-veldlengte. De server controleert het bij inzenden en goedkeuren; het formulier zet `maxlength`.
+- `"invoerType": "automatisch"` + `"afgeleidVan": {"veld": "Main_Entity", "bc-tabel": "LVS_MainEntityCard", "sleutel-kolom": "No", "kolom": "KVT_Latitude_…"}` – niet invulbaar. Bij **goedkeuren** haalt de server de waarde vers (max_age 0) uit het BC-record waarvan `sleutel-kolom` gelijk is aan de waarde van formulierveld `veld`. Zonder `bc-tabel` (alleen `{"veld": "…"}`) wordt de waarde van dat formulierveld gekopieerd (afgekapt op `maxLengte`). Een verplicht automatisch veld dat leeg blijft, laat goedkeuren falen met een duidelijke melding.
+- `optiesBron."afhankelijkVan": {"veld": "Manufacturer_Code", "kolom": "Manufacturer_Code"}` – suggesties alleen uit rijen waarvan `kolom` gelijk is aan de huidige waarde van formulierveld `veld` (leeg = alles). Dubbele waarden in de bron worden één keer getoond.
 - `"bcGeblokkeerd": "melding"` (hoogste niveau) – aanmaken in BC kan (nog) niet. Het formulier toont de melding, indienen kan wel, en goedkeuren faalt vóór elke BC-call met deze melding (het verzoek blijft Ingediend). Weghalen zodra BC zover is.
 - `"_bron"` / `"_todo"` – documentatie in de config, wordt genegeerd.
 
@@ -80,7 +83,7 @@ De config wordt bij het laden gevalideerd; fouten verschijnen als duidelijke lij
 Beide gebruiken `max+1` (geen gaten opvullen: verwijderde nummers als ME12600003 komen dan niet terug).
 
 - **Servicelocatie:** `Description` (naam, verplicht), `KVT_Description_2`, `Bill_to_Contact_No` (strikte lookup op `Contacts` met `KVT_Customer_No ne ''`, verplicht; BC leidt `Bill_to_Customer_No` er zelf van af), `KVT_Address`, `KVT_Post_Code`, `KVT_City` (verplicht), `KVT_Address_2`, `KVT_Country_Region_Code` (NL/BE/DE/IT/FI/PL, verplicht), `KVT_Language_Code` en `KVT_Language_Service_Report` (uit `AppLanguages`), coördinaten (`KVT_Latitude_Coordinate__x005B_DD_x005D_`, `KVT_Longitude_…`) en `KVT_Safety_Text`.
-- **Component:** `Main_Entity` (strikte lookup op `LVS_MainEntityCard`), `Sub_Entity` (Equipmentsoort, de 44 codes die in KVT voorkomen), `Description`, `Serial_No` (verplicht; `NOG NIET BEKEND` als het onbekend is), `Description_2`, `Manufacturer_Code` (suggesties), `Manufacturer_Model`, `Software_Version`, `Date_of_Installation`.
+- **Component** (volgens Tims veldspecificatie van 09-10-2026): `Main_Entity` (Servicelocatie, strikte lookup op `LVS_MainEntityCard`, verplicht; niet in Tims lijst maar nodig voor de koppeling en de coördinaten), `Sub_Entity` (Equipmentsoort, de 44 codes die in KVT voorkomen), `Description` (Omschrijving, max 100, verplicht), `Manufacturer_Code` (suggesties, max 10, verplicht), `Manufacturer_Model` (suggesties uit bestaande componenten, gefilterd op producent, max 50, verplicht), `Description_2` (automatisch: kopie van het model, max 50), `Serial_No` (max 50, verplicht; `NOG NIET BEKEND` als het onbekend is), coördinaten `KVT_Latitude_Coordinate__x005B_DD_x005D_`/`KVT_Longitude_…` (automatisch uit de gekozen servicelocatie, verplicht) en `KVT_Place_On_Location` (max 50). Niet gepubliceerd in BC: LVS Sub Entity, Manufacturer, LVS Manufacturer Model. 'Naam' en 'ProjectNr.' uit Tims lijst staan er (nog) niet in: zie de open vragen in de PR.
 - **Component is geblokkeerd** (`bcGeblokkeerd`): `Main_Entity` is op `AppComponentCard` niet bewerkbaar (AllowEdit/AllowEditOnCreate=false). De LVS-partner wordt gevraagd dat aan te passen. Daarna `bcGeblokkeerd` weghalen en eerst op `kvtfat_aad` testen.
 - **Nummerreeks-risico:** ME- en COM-nummers komen in BC uit een nummerreeks. Thoth kiest zelf het volgende nummer; de *laatst gebruikte* van de BC-reeks loopt niet mee, waardoor een BC-gebruiker daarna een "bestaat al"-fout kan krijgen. Afspreken met KVT.
 - Niet op het formulier: `Super_Entity_Code`, `VAT_Bus_Posting_Group`, contactnummers van eigenaar/bouwer (BC-tabellen niet gepubliceerd of zelden gebruikt) en draaiuren (alleen-lezen).
@@ -123,7 +126,7 @@ php -S 127.0.0.1:8080 -t web
 for f in tests/*_test.php; do php "$f" || exit 1; done
 ```
 
-Tests (PHP CLI, zoals bij Consus): `numbering_test.php` (padding, jaar, eerste vrije, max+1), `config_test.php` (configvalidatie, restrictiehook), `workflow_test.php` (statusovergangen, rechten, inzendvoorwaarde, strikte lookup, historie), `bc_insert_test.php` (BC-insert met gemockte HTTP-client: URL/headers/auth, conflict-retry, lock, Mímir-terugval, zoeken), `page_smoke_test.php` (pagina's via `php -S`, CSRF, escaping, autosave).
+Tests (PHP CLI, zoals bij Consus): `numbering_test.php` (padding, jaar, eerste vrije, max+1), `config_test.php` (configvalidatie, restrictiehook), `workflow_test.php` (statusovergangen, rechten, inzendvoorwaarde, strikte lookup, historie), `bc_insert_test.php` (BC-insert met gemockte HTTP-client: URL/headers/auth, conflict-retry, lock, Mímir-terugval, zoeken), `page_smoke_test.php` (pagina's via `php -S`, CSRF, escaping, autosave), `derived_test.php` (automatische velden, maxLengte, afhankelijke suggesties, echte component-config).
 
 ## Deploy
 

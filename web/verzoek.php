@@ -123,6 +123,7 @@ thoth_header(($request ? 'Verzoek #' . $request['id'] : 'Nieuwe ' . strtolower(t
         $name = 'v[' . $key . ']';
         $dis = $editable ? '' : ' disabled';
         $req = $field['verplicht'] ? ' data-verplicht="1"' : '';
+        $maxAttr = ($field['maxLengte'] ?? null) !== null ? ' maxlength="' . (int) $field['maxLengte'] . '"' : '';
         if (!$editable) {
             $field['placeholder'] = '';
         }
@@ -151,9 +152,9 @@ thoth_header(($request ? 'Verzoek #' . $request['id'] : 'Nieuwe ' . strtolower(t
             case 'lookup':
                 $strict = $field['invoerType'] === 'lookup';
                 $label = (string) ($labels[$key] ?? $value); ?>
-          <div class="combo" data-combo data-strikt="<?= $strict ? '1' : '0' ?>" data-veld="<?= h($key) ?>">
+          <div class="combo" data-combo data-strikt="<?= $strict ? '1' : '0' ?>" data-veld="<?= h($key) ?>"<?= ($field['optiesBron']['afhankelijkVan'] ?? null) !== null ? ' data-ouder="' . h($field['optiesBron']['afhankelijkVan']['veld']) . '"' : '' ?>>
             <input type="text" id="<?= h($inputId) ?>" class="combo-input" autocomplete="off" placeholder="<?= h($field['placeholder']) ?>"
-              value="<?= h($strict ? $label : $value) ?>"<?= $strict ? '' : ' name="' . h($name) . '"' ?><?= $req . $dis ?>>
+              value="<?= h($strict ? $label : $value) ?>"<?= $strict ? '' : ' name="' . h($name) . '"' ?><?= $maxAttr . $req . $dis ?>>
             <?php if ($strict): ?>
               <input type="hidden" class="combo-value" name="<?= h($name) ?>" value="<?= h($value) ?>">
               <input type="hidden" class="combo-label" name="l[<?= h($key) ?>]" value="<?= h($label) ?>">
@@ -162,10 +163,15 @@ thoth_header(($request ? 'Verzoek #' . $request['id'] : 'Nieuwe ' . strtolower(t
             <?php if ($strict): ?><div class="hint">Typ om te zoeken en kies een bestaande waarde uit de lijst.</div><?php endif; ?>
           </div>
         <?php break;
+            case 'automatisch':
+                $srcField = thoth_config_fields_by_key($config)[$field['afgeleidVan']['veld']] ?? null; ?>
+          <input type="text" id="<?= h($inputId) ?>" value="<?= h($value) ?>" readonly disabled placeholder="Automatisch">
+          <div class="hint">Wordt bij goedkeuren automatisch overgenomen uit <?= h(($srcField['name'] ?? $field['afgeleidVan']['veld']) . ($field['afgeleidVan']['bc-tabel'] !== null ? ' (' . $field['afgeleidVan']['bc-tabel'] . ')' : '')) ?>.</div>
+        <?php break;
             default:
                 $htmlType = ['date' => 'date', 'time' => 'time', 'datetime' => 'datetime-local'][$field['invoerType']] ?? 'text'; ?>
           <input type="<?= $htmlType ?>" id="<?= h($inputId) ?>" name="<?= h($name) ?>" value="<?= h($value) ?>" placeholder="<?= h($field['placeholder']) ?>"
-            <?= $field['invoerType'] === 'nummer' ? 'inputmode="decimal"' : '' ?><?= $req . $dis ?>>
+            <?= $field['invoerType'] === 'nummer' ? 'inputmode="decimal"' : '' ?><?= $maxAttr . $req . $dis ?>>
         <?php endswitch; ?>
         <?php if (isset($fieldErrors[$key])): ?><div class="error-inline"><?= h($fieldErrors[$key]) ?></div><?php endif; ?>
       </div>

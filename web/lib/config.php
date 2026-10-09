@@ -12,6 +12,14 @@ declare(strict_types=1);
  *  - invoerType "lookup" (of "combobox" met "strikt": true): strikte keuze uit BC,
  *    alleen een bestaande waarde mag worden opgeslagen en ingezonden.
  *  - "restricties": per veld, regels uit het register in validation.php (v2).
+ *  - "maxLengte": <int> per veld: maximaal aantal tekens (BC-veldlengte). Server-side gecontroleerd.
+ *  - invoerType "automatisch" + "afgeleidVan": {"veld", "bc-tabel", "sleutel-kolom", "kolom"}:
+ *      niet invulbaar; bij goedkeuren server-side (vers uit BC via Mímir) overgenomen uit het
+ *      record in "bc-tabel" waarvan "sleutel-kolom" gelijk is aan de waarde van formulierveld "veld"
+ *      (een bc-kolom van dit formulier). Bv. coördinaten uit de gekozen servicelocatie.
+ *      Alleen {"veld"}: kopie van de waarde van dat formulierveld (afgekapt op maxLengte).
+ *  - optiesBron."afhankelijkVan": {"veld", "kolom"}: suggesties alleen uit rijen waarvan
+ *      "kolom" gelijk is aan de huidige waarde van formulierveld "veld" (leeg = geen filter).
  *  - "bcGeblokkeerd": "<melding>" op het hoogste niveau: aanmaken in BC kan (nog) niet,
  *    bv. omdat een veld in BC niet bewerkbaar is. Indienen kan wel; goedkeuren faalt
  *    dan vóór elke BC-call met deze melding en het verzoek blijft Ingediend.
@@ -22,7 +30,7 @@ const THOTH_TYPES = [
     'component' => ['label' => 'Component', 'file' => 'component-config.json'],
 ];
 
-const THOTH_INPUT_TYPES = ['tekst', 'nummer', 'dropdown', 'combobox', 'lookup', 'date', 'time', 'datetime'];
+const THOTH_INPUT_TYPES = ['tekst', 'nummer', 'dropdown', 'combobox', 'lookup', 'date', 'time', 'datetime', 'automatisch'];
 
 /**
  * Standaard nummerstrategie. Eén regel om te zetten:
@@ -186,6 +194,18 @@ function thoth_validate_config(array $raw, string $source = 'config'): array
             $errors[] = $label . ': gebruik "opties" of "optiesBron", niet allebei.';
         }
 
+        $maxLength = $f['maxLengte'] ?? null;
+        if ($maxLength !== null && (!is_int($maxLength) || $maxLength < 1 || $maxLength > 2048)) {
+            $errors[] = $label . ': "maxLengte" moet een geheel getal van 1 t/m 2048 zijn.';
+            $maxLength = null;
+        }
+        $derived = null;
+        if ($type === 'automatisch') {
+            $derived = thoth_normalize_derived($f['afgeleidVan'] ?? null, $label, $errors);
+        } elseif (array_key_exists('afgeleidVan', $f)) {
+            $errors[] = $label . ': "afgeleidVan" hoort alleen bij invoerType automatisch.';
+        }
+
         $rules = $f['restricties'] ?? [];
         if (!is_array($rules) || !array_is_list($rules)) {
             $errors[] = $label . ': "restricties" moet een lijst zijn.';
@@ -209,7 +229,33 @@ function thoth_validate_config(array $raw, string $source = 'config'): array
             'opties' => $options,
             'optiesBron' => $optSource,
             'restricties' => $rules,
+            'maxLengte' => $maxLength,
+            'afgeleidVan' => $derived,
         ];
+    }
+
+    // Verwijzingen naar andere formuliervelden (afgeleidVan.veld, optiesBron.afhankelijkVan.veld).
+    foreach ($normalized as $nf) {
+        $refs = [];
+        if ($nf['afgeleidVan'] !== null) {
+            $refs['afgeleidVan'] = $nf['afgeleidVan']['veld'];
+        }
+        if (($nf['optiesBron']['afhankelijkVan'] ?? null) !== null) {
+            $refs['optiesBron.afhankelijkVan'] = $nf['optiesBron']['afhankelijkVan']['veld'];
+        }
+        foreach ($refs as $what => $ref) {
+            $target = null;
+            foreach ($normalized as $other) {
+                if ($other['key'] === $ref) {
+                    $target = $other;
+                }
+            }
+            if ($target === null || $ref === $nf['key']) {
+                $errors[] = $nf['name'] . ': ' . $what . '."veld" ' . $ref . ' is geen ander veld (bc-kolom) van dit formulier.';
+            } elseif ($target['invoerType'] === 'automatisch') {
+                $errors[] = $nf['name'] . ': ' . $what . '."veld" ' . $ref . ' mag zelf niet automatisch zijn.';
+            }
+        }
     }
 
     if (count($tables) > 1) {
@@ -308,6 +354,17 @@ function thoth_normalize_option_source(mixed $src, string $label, string $type, 
         $errors[] = $label . ': optiesBron."filter" moet een OData-filtertekst zijn.';
         $ok = false;
     }
+    $dependsOn = null;
+    if (array_key_exists('afhankelijkVan', $src)) {
+        $dep = $src['afhankelijkVan'];
+        if (!is_array($dep) || !is_string($dep['veld'] ?? null) || !thoth_is_identifier($dep['veld'])
+            || !is_string($dep['kolom'] ?? null) || !thoth_is_identifier($dep['kolom'])) {
+            $errors[] = $label . ': optiesBron."afhankelijkVan" moet {"veld", "kolom"} zijn.';
+            $ok = false;
+        } else {
+            $dependsOn = ['veld' => $dep['veld'], 'kolom' => $dep['kolom']];
+        }
+    }
     if (!$ok) {
         return null;
     }
@@ -321,7 +378,30 @@ function thoth_normalize_option_source(mixed $src, string $label, string $type, 
         'label-kolommen' => array_values($labelCols),
         'zoek-kolommen' => array_values($searchCols),
         'filter' => (string) $filter,
+        'afhankelijkVan' => $dependsOn,
     ];
+}
+
+/** @return array{veld:string,bc-tabel:?string,sleutel-kolom:?string,kolom:?string}|null */
+function thoth_normalize_derived(mixed $src, string $label, array &$errors): ?array
+{
+    if (!is_array($src)) {
+        $errors[] = $label . ': automatisch heeft "afgeleidVan" nodig: {"veld", "bc-tabel", "sleutel-kolom", "kolom"}.';
+        return null;
+    }
+    $out = [];
+    // Zonder "bc-tabel": kopie van de waarde van formulierveld "veld" zelf.
+    $keys = array_key_exists('bc-tabel', $src) ? ['veld', 'bc-tabel', 'sleutel-kolom', 'kolom'] : ['veld'];
+    foreach ($keys as $k) {
+        $v = $src[$k] ?? null;
+        if (!is_string($v) || !thoth_is_identifier($v)) {
+            $errors[] = $label . ': afgeleidVan."' . $k . '" ontbreekt of is ongeldig.';
+            return null;
+        }
+        $out[$k] = $v;
+    }
+
+    return $out + ['bc-tabel' => null, 'sleutel-kolom' => null, 'kolom' => null];
 }
 
 /** @return array<string, array> velden op key */

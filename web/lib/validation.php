@@ -71,6 +71,9 @@ function thoth_validate_values(array $config, array $values, array $context): ar
     foreach ($config['formFields'] as $field) {
         $key = $field['key'];
         $value = $values[$key] ?? null;
+        if ($field['invoerType'] === 'automatisch' && ($context['moment'] ?? '') !== 'goedkeuren') {
+            continue; // wordt pas bij goedkeuren bepaald (thoth_resolve_derived)
+        }
         if (thoth_value_is_empty($value)) {
             if ($field['verplicht']) {
                 $errors[$key] = $field['name'] . ' is verplicht.';
@@ -78,6 +81,10 @@ function thoth_validate_values(array $config, array $values, array $context): ar
             continue;
         }
         $value = is_string($value) ? trim($value) : $value;
+        if (($field['maxLengte'] ?? null) !== null && mb_strlen((string) $value) > $field['maxLengte']) {
+            $errors[$key] = $field['name'] . ' is te lang (max ' . $field['maxLengte'] . ' tekens).';
+            continue;
+        }
         foreach ($typeRules[$field['invoerType']] ?? [] as $rule) {
             $msg = $rule($value, $field, $context, []);
             if ($msg !== null) {
@@ -124,14 +131,25 @@ function thoth_field_options(array $field, array $context): array
     if (isset($GLOBALS['thothOptionMemo'][$memoKey])) {
         return $GLOBALS['thothOptionMemo'][$memoKey];
     }
-    $select = array_values(array_unique(array_merge([$src['waarde-kolom']], $src['label-kolommen'], $src['zoek-kolommen'])));
-    $rows = thoth_bc_read((string) ($context['environment'] ?? ''), (string) $context['company'], $src['bc-tabel'], $select, $src['filter'], THOTH_UI_MAX_AGE);
+    $depCol = $src['afhankelijkVan']['kolom'] ?? null;
+    $select = array_values(array_unique(array_merge([$src['waarde-kolom']], $src['label-kolommen'], $src['zoek-kolommen'], $depCol !== null ? [$depCol] : [])));
+    $reader = $GLOBALS['thothOptionReader'] ?? null;
+    $rows = is_callable($reader)
+        ? $reader($src, $select, $context)
+        : thoth_bc_read((string) ($context['environment'] ?? ''), (string) $context['company'], $src['bc-tabel'], $select, $src['filter'], THOTH_UI_MAX_AGE);
     $out = [];
+    $seen = [];
     foreach ($rows as $row) {
         $value = trim((string) ($row[$src['waarde-kolom']] ?? ''));
         if ($value === '') {
             continue;
         }
+        // Bron kan dezelfde waarde vaak bevatten (bv. modellen uit bestaande componenten): één keer tonen.
+        $dedupe = mb_strtolower($value . "\x1f" . ($depCol !== null ? trim((string) ($row[$depCol] ?? '')) : ''));
+        if (isset($seen[$dedupe])) {
+            continue;
+        }
+        $seen[$dedupe] = true;
         $out[] = ['waarde' => $value, 'label' => thoth_row_label($row, $src), 'aliassen' => [], 'row' => $row];
     }
 
@@ -217,12 +235,16 @@ function thoth_lookup_exists(array $field, string $value, array $context): bool
  *
  * @return list<array{waarde:string,label:string}>
  */
-function thoth_search_options(array $field, string $query, array $context, int $limit = 20): array
+function thoth_search_options(array $field, string $query, array $context, int $limit = 20, string $parentValue = ''): array
 {
+    $depCol = $field['optiesBron']['afhankelijkVan']['kolom'] ?? null;
     $terms = array_values(array_filter(preg_split('/\s+/u', mb_strtolower(trim($query))) ?: [], static fn ($t) => $t !== ''));
     $cols = $field['optiesBron']['zoek-kolommen'] ?? [];
     $out = [];
     foreach (thoth_field_options($field, $context) as $opt) {
+        if ($depCol !== null && trim($parentValue) !== '' && !thoth_same_value((string) ($opt['row'][$depCol] ?? ''), $parentValue)) {
+            continue;
+        }
         $hay = mb_strtolower($opt['waarde'] . ' ' . $opt['label']);
         foreach ($cols as $col) {
             $hay .= ' ' . mb_strtolower((string) ($opt['row'][$col] ?? ''));
@@ -239,6 +261,66 @@ function thoth_search_options(array $field, string $query, array $context, int $
     }
 
     return $out;
+}
+
+/**
+ * Vult de automatische velden (invoerType automatisch) vers uit BC, bij goedkeuren.
+ * Geeft [waarden, fouten] terug; een verplicht automatisch veld dat leeg blijft is een fout.
+ *
+ * @param array<string, mixed> $values
+ * @return array{0: array<string, mixed>, 1: array<string, string>}
+ */
+function thoth_resolve_derived(array $config, array $values, array $context): array
+{
+    $errors = [];
+    $byKey = thoth_config_fields_by_key($config);
+    $reader = $GLOBALS['thothDerivedReader'] ?? null;
+    $memo = [];
+    foreach ($config['formFields'] as $field) {
+        $src = $field['afgeleidVan'] ?? null;
+        if ($field['invoerType'] !== 'automatisch' || !is_array($src)) {
+            continue;
+        }
+        $key = $field['key'];
+        $sourceField = $byKey[$src['veld']] ?? null;
+        $sourceName = $sourceField['name'] ?? $src['veld'];
+        $keyValue = trim((string) ($values[$src['veld']] ?? ''));
+        $values[$key] = '';
+        if ($src['bc-tabel'] === null) {
+            $values[$key] = ($field['maxLengte'] ?? null) !== null ? mb_substr($keyValue, 0, $field['maxLengte']) : $keyValue;
+        } elseif ($keyValue !== '') {
+            $memoKey = $src['bc-tabel'] . '|' . $src['sleutel-kolom'] . '|' . $src['kolom'] . '|' . mb_strtolower($keyValue);
+            if (!array_key_exists($memoKey, $memo)) {
+                $filter = $src['sleutel-kolom'] . " eq '" . thoth_odata_quote($keyValue) . "'";
+                $rows = is_callable($reader)
+                    ? $reader($src, $filter, $context)
+                    : thoth_bc_read((string) ($context['environment'] ?? ''), (string) ($context['company'] ?? ''), $src['bc-tabel'], [$src['sleutel-kolom'], $src['kolom']], $filter, 0);
+                $memo[$memoKey] = null;
+                foreach ($rows as $row) {
+                    if (thoth_same_value((string) ($row[$src['sleutel-kolom']] ?? ''), $keyValue)) {
+                        $memo[$memoKey] = $row;
+                        break;
+                    }
+                }
+            }
+            $row = $memo[$memoKey];
+            if ($row === null) {
+                $errors[$key] = $field['name'] . ': ' . $sourceName . ' ' . $keyValue . ' niet gevonden in BC (' . $src['bc-tabel'] . ').';
+                continue;
+            }
+            $value = trim((string) ($row[$src['kolom']] ?? ''));
+            if (($field['maxLengte'] ?? null) !== null) {
+                $value = mb_substr($value, 0, $field['maxLengte']);
+            }
+            $values[$key] = $value;
+        }
+        if ($values[$key] === '' && $field['verplicht']) {
+            $errors[$key] = $field['name'] . ' kon niet automatisch worden overgenomen: ' . $sourceName
+                . ($keyValue !== '' && $src['kolom'] !== null ? ' ' . $keyValue . ' heeft geen ' . $src['kolom'] . ' in BC.' : ' is leeg.');
+        }
+    }
+
+    return [$values, $errors];
 }
 
 /**

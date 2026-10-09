@@ -5,7 +5,7 @@ declare(strict_types=1);
 /**
  * JSON-endpoints voor het formulier.
  *   POST actie=opslaan   debounced autosave (CSRF verplicht), maakt zo nodig een Concept aan.
- *   GET  actie=zoek      suggesties voor combobox/lookup (type, veld, bedrijf, q).
+ *   GET  actie=zoek      suggesties voor combobox/lookup (type, veld, bedrijf, q, optioneel ouder).
  */
 
 require_once __DIR__ . '/lib/bootstrap.php';
@@ -44,7 +44,8 @@ try {
         }
         $q = mb_substr((string) ($_GET['q'] ?? ''), 0, 100);
         $context = ['company' => $company['name'], 'environment' => $company['environment'], 'moment' => 'opslaan'];
-        thoth_json(['ok' => true, 'resultaten' => thoth_search_options($field, $q, $context)]);
+        $parent = mb_substr((string) ($_GET['ouder'] ?? ''), 0, 250);
+        thoth_json(['ok' => true, 'resultaten' => thoth_search_options($field, $q, $context, 20, $parent)]);
     }
     thoth_json(['ok' => false, 'fout' => 'Onbekende actie.'], 400);
 } catch (ThothActionException | ThothConfigException $e) {

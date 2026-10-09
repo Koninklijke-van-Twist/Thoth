@@ -214,13 +214,14 @@ function thoth_approve(int $id, string $approver, ?callable $inserter = null): a
         }
         $context = thoth_request_context($request, 'goedkeuren');
         try {
-            $fieldErrors = thoth_validate_values($config, $request['data'], $context);
+            [$data, $derivedErrors] = thoth_resolve_derived($config, $request['data'], $context);
+            $fieldErrors = $derivedErrors + thoth_validate_values($config, $data, $context);
             if ($fieldErrors !== []) {
                 $msg = 'Validatie mislukt: ' . implode(' ', $fieldErrors);
                 thoth_record_bc_error($id, $msg);
                 return ['ok' => false, 'error' => $msg, 'fields' => $fieldErrors];
             }
-            $payload = thoth_build_bc_payload($config, $request['data'], $context);
+            $payload = thoth_build_bc_payload($config, $data, $context);
             $reserved = $request['bc_reserved'];
             $options = [
                 'check_first' => $reserved,
