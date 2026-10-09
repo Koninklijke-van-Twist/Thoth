@@ -14,6 +14,8 @@ const THOTH_STATUS_CONCEPT = 'Concept';
 const THOTH_STATUS_SUBMITTED = 'Ingediend';
 const THOTH_STATUS_APPROVED = 'Goedgekeurd';
 const THOTH_STATUS_REJECTED = 'Afgewezen';
+/** Tijdelijk tijdens goedkeuren (BC-insert loopt); afwijzen of bewerken kan dan niet. */
+const THOTH_STATUS_PROCESSING = 'In behandeling';
 
 function thoth_data_dir(): string
 {

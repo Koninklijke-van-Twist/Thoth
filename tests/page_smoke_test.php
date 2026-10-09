@@ -59,6 +59,8 @@ check(str_contains($body, 'automatisch overgenomen uit Servicelocatie (LVS_MainE
 check(str_contains($body, 'maxlength="50"'), 'maxlength op tekstvelden');
 check(str_contains($body, 'data-ouder="Manufacturer_Code"'), 'model-suggesties afhankelijk van producent');
 check(str_contains($body, 'automatisch overgenomen uit Model producent (KVT_LVS_Manufacturer_Model).'), 'omschrijving 2 uit modeltabel');
+preg_match_all('/data-strikt="1".*?<input type="text"[^>]*class="combo-input"[^>]*>/s', $body, $strictInputs);
+check(count($strictInputs[0]) === 4 && !preg_grep('/maxlength=/', $strictInputs[0]), 'strikte lookup: zoekveld zonder maxlength (label is langer dan de code)');
 check(substr_count($body, 'data-strikt="1"') === 4, 'servicelocatie, equipmentsoort, producent en model zijn strikt');
 check(str_contains($body, 'name="v[KVT_Latitude_Coordinate__x005B_DD_x005D_]" value="" readonly'), 'overschrijfbare coördinaat: readonly en ingestuurd');
 check(!str_contains($body, 'name="v[Description_2]"'), 'niet-overschrijfbaar automatisch veld wordt niet ingestuurd');

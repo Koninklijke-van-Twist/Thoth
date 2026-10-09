@@ -37,11 +37,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $config !== null) {
     $action = (string) ($_POST['actie'] ?? '');
     try {
         if ($action === 'indienen') {
-            $company = thoth_company_by_key((string) ($_POST['bedrijf'] ?? ''), $companies);
-            $request = thoth_save_draft($id, $type, $thothUser, (array) ($_POST['v'] ?? []), (array) ($_POST['l'] ?? []), $company['name'] ?? '', $company['environment'] ?? '');
+            [$companyName, $companyEnv] = thoth_company_from_key((string) ($_POST['bedrijf'] ?? ''), $companies);
+            $request = thoth_save_draft($id, $type, $thothUser, (array) ($_POST['v'] ?? []), (array) ($_POST['l'] ?? []), $companyName, $companyEnv);
             $id = $request['id'];
-            if ($company !== null) {
-                thoth_set_pref($thothUser, $company['name'], $company['environment']);
+            if ($companyName !== null && $companyName !== '') {
+                thoth_set_pref($thothUser, $companyName, (string) $companyEnv);
             }
             $fieldErrors = thoth_submit($id, $thothUser);
             if ($fieldErrors === []) {
@@ -169,7 +169,7 @@ thoth_header(($request ? 'Verzoek #' . $request['id'] : 'Nieuwe ' . strtolower(t
                 $label = (string) ($labels[$key] ?? $value); ?>
           <div class="combo" data-combo data-strikt="<?= $strict ? '1' : '0' ?>" data-veld="<?= h($key) ?>"<?= ($field['optiesBron']['afhankelijkVan'] ?? null) !== null ? ' data-ouder="' . h($field['optiesBron']['afhankelijkVan']['veld']) . '"' : '' ?>>
             <input type="text" id="<?= h($inputId) ?>" class="combo-input" autocomplete="off" placeholder="<?= h($field['placeholder']) ?>"
-              value="<?= h($strict ? $label : $value) ?>"<?= $strict ? '' : ' name="' . h($name) . '"' ?><?= $maxAttr . $req . $dis ?>>
+              value="<?= h($strict ? $label : $value) ?>"<?= $strict ? '' : ' name="' . h($name) . '"' ?><?= ($strict ? '' : $maxAttr) . $req . $dis ?>>
             <?php if ($strict): ?>
               <input type="hidden" class="combo-value" name="<?= h($name) ?>" value="<?= h($value) ?>">
               <input type="hidden" class="combo-label" name="l[<?= h($key) ?>]" value="<?= h($label) ?>">
@@ -215,7 +215,7 @@ thoth_header(($request ? 'Verzoek #' . $request['id'] : 'Nieuwe ' . strtolower(t
     <?php endif; ?>
   </form>
 
-  <?php if ($request && $request['status'] === THOTH_STATUS_SUBMITTED && thoth_is_approver($thothUser)): ?>
+  <?php if ($request && in_array($request['status'], [THOTH_STATUS_SUBMITTED, THOTH_STATUS_PROCESSING], true) && thoth_is_approver($thothUser)): ?>
     <section class="card approve-box">
       <h2>Beoordelen</h2>
       <p class="muted">Aanvrager: <?= h($request['owner']) ?> · Bedrijf: <?= h($request['company']) ?> (<?= h($request['environment']) ?>) · BC-tabel: <?= h($config['bc-tabel']) ?></p>
@@ -226,12 +226,16 @@ thoth_header(($request ? 'Verzoek #' . $request['id'] : 'Nieuwe ' . strtolower(t
         <?= thoth_csrf_field() ?><input type="hidden" name="id" value="<?= (int) $request['id'] ?>">
         <button type="submit" name="actie" value="goedkeuren" class="btn btn-ok">Goedkeuren en aanmaken in BC</button>
       </form>
+      <?php if ($request['status'] === THOTH_STATUS_PROCESSING): ?>
+      <p class="muted">Dit verzoek wordt aangemaakt in BC (of een eerdere poging is afgebroken). Opnieuw goedkeuren controleert eerst de gereserveerde nummers in BC.</p>
+      <?php else: ?>
       <form method="post" class="reject-form">
         <?= thoth_csrf_field() ?><input type="hidden" name="id" value="<?= (int) $request['id'] ?>">
         <label for="reden">Reden van afwijzen (optioneel)</label>
         <textarea id="reden" name="reden" rows="2" maxlength="2000"></textarea>
         <button type="submit" name="actie" value="afwijzen" class="btn btn-danger">Afwijzen</button>
       </form>
+      <?php endif; ?>
       <?php endif; ?>
     </section>
   <?php endif; ?>
@@ -266,7 +270,7 @@ thoth_header(($request ? 'Verzoek #' . $request['id'] : 'Nieuwe ' . strtolower(t
     </div>
   </dialog>
   <script src="assets/vendor/leaflet/leaflet.js?v=1.9.4"></script>
-  <script src="assets/kaart.js?v=1"></script>
+  <script src="assets/kaart.js?v=2"></script>
   <?php endif; ?>
 <?php endif; ?>
 <?php thoth_footer();

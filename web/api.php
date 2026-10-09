@@ -26,10 +26,10 @@ try {
         thoth_require_csrf();
         $type = (string) ($_POST['type'] ?? '');
         $id = ctype_digit((string) ($_POST['id'] ?? '')) ? (int) $_POST['id'] : null;
-        $company = thoth_company_by_key((string) ($_POST['bedrijf'] ?? ''), thoth_companies());
-        $request = thoth_save_draft($id, $type, $thothUser, (array) ($_POST['v'] ?? []), (array) ($_POST['l'] ?? []), $company['name'] ?? '', $company['environment'] ?? '');
-        if ($company !== null) {
-            thoth_set_pref($thothUser, $company['name'], $company['environment']);
+        [$companyName, $companyEnv] = thoth_company_from_key((string) ($_POST['bedrijf'] ?? ''), thoth_companies());
+        $request = thoth_save_draft($id, $type, $thothUser, (array) ($_POST['v'] ?? []), (array) ($_POST['l'] ?? []), $companyName, $companyEnv);
+        if ($companyName !== null && $companyName !== '') {
+            thoth_set_pref($thothUser, $companyName, (string) $companyEnv);
         }
         thoth_json(['ok' => true, 'id' => $request['id'], 'opgeslagen' => substr((string) $request['updated_at'], 11, 8)]);
     }

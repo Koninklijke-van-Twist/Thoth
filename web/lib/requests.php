@@ -7,9 +7,12 @@ declare(strict_types=1);
  *   (nieuw)     -> Concept      aanvrager, eerste autosave
  *   Concept     -> Ingediend    aanvrager, als alle verplichte velden en restricties kloppen
  *   Afgewezen   -> Ingediend    aanvrager, idem (Afgewezen blijft bewerkbaar)
- *   Ingediend   -> Goedgekeurd  approver, alleen als de BC-insert lukt
- *   Ingediend   -> Afgewezen    approver, optionele reden
- * Mislukt de BC-insert, dan blijft het Ingediend met bc_error.
+ *   Ingediend   -> In behandeling -> Goedgekeurd  approver; de claim (conditionele UPDATE) gaat vóór de
+ *                                 BC-insert, zodat afwijzen of bewerken intussen niet kan
+ *   Ingediend   -> Afgewezen    approver, optionele reden (alleen vanaf Ingediend)
+ * Mislukt de BC-insert, dan gaat het terug naar Ingediend met bc_error.
+ * Een vastgelopen 'In behandeling' (proces gecrasht) kan opnieuw worden goedgekeurd: de approve-lock
+ * is dan vrij en de gereserveerde nummers worden eerst in BC gecontroleerd.
  */
 
 final class ThothActionException extends RuntimeException
@@ -19,7 +22,8 @@ final class ThothActionException extends RuntimeException
 const THOTH_TRANSITIONS = [
     THOTH_STATUS_CONCEPT => [THOTH_STATUS_SUBMITTED],
     THOTH_STATUS_REJECTED => [THOTH_STATUS_SUBMITTED],
-    THOTH_STATUS_SUBMITTED => [THOTH_STATUS_APPROVED, THOTH_STATUS_REJECTED],
+    THOTH_STATUS_SUBMITTED => [THOTH_STATUS_PROCESSING, THOTH_STATUS_REJECTED],
+    THOTH_STATUS_PROCESSING => [THOTH_STATUS_APPROVED, THOTH_STATUS_SUBMITTED],
     THOTH_STATUS_APPROVED => [],
 ];
 
@@ -89,7 +93,7 @@ function thoth_request_context(array $request, string $moment): array
  * @param array<string, mixed> $values
  * @param array<string, string> $labels weergavelabels voor lookupvelden
  */
-function thoth_save_draft(?int $id, string $type, string $email, array $values, array $labels, string $company, string $environment): array
+function thoth_save_draft(?int $id, string $type, string $email, array $values, array $labels, ?string $company, ?string $environment): array
 {
     if (!thoth_is_allowed($email)) {
         throw new ThothActionException('Geen toegang.');
@@ -109,6 +113,8 @@ function thoth_save_draft(?int $id, string $type, string $email, array $values, 
     $now = thoth_now();
     $db = thoth_db();
     if ($id === null) {
+        $company ??= '';
+        $environment ??= '';
         $db->prepare('INSERT INTO requests (type, owner, company, environment, status, data_json, labels_json, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)')
             ->execute([$type, strtolower($email), $company, $environment, THOTH_STATUS_CONCEPT, json_encode($clean, JSON_UNESCAPED_UNICODE), json_encode($cleanLabels, JSON_UNESCAPED_UNICODE), $now, $now]);
         $newId = (int) $db->lastInsertId();
@@ -123,8 +129,24 @@ function thoth_save_draft(?int $id, string $type, string $email, array $values, 
     if ($request['type'] !== $type) {
         throw new ThothActionException('Verkeerd aanvraagtype.');
     }
-    $db->prepare('UPDATE requests SET company = ?, environment = ?, data_json = ?, labels_json = ?, updated_at = ? WHERE id = ?')
-        ->execute([$company, $environment, json_encode($clean + $request['data'], JSON_UNESCAPED_UNICODE), json_encode($cleanLabels + $request['labels'], JSON_UNESCAPED_UNICODE), $now, $id]);
+    $hook = $GLOBALS['thothBeforeDraftUpdate'] ?? null; // test-hook: race tussen lezen en schrijven
+    if (is_callable($hook)) {
+        $hook($id);
+    }
+    // Onbekend bedrijf (null) = laten staan. Alleen schrijven zolang het nog bewerkbaar is
+    // (status in de WHERE): een late autosave na indienen overschrijft niets.
+    $st = $db->prepare('UPDATE requests SET company = ?, environment = ?, data_json = ?, labels_json = ?, updated_at = ?
+        WHERE id = ? AND owner = ? AND status IN (?, ?)');
+    $st->execute([$company ?? $request['company'], $environment ?? $request['environment'],
+        json_encode($clean + $request['data'], JSON_UNESCAPED_UNICODE), json_encode($cleanLabels + $request['labels'], JSON_UNESCAPED_UNICODE), $now,
+        $id, strtolower($email), THOTH_STATUS_CONCEPT, THOTH_STATUS_REJECTED]);
+    if ($st->rowCount() !== 1) {
+        $fresh = thoth_get_request($id);
+        if ($fresh === null || !thoth_can_edit($fresh, $email)) {
+            throw new ThothActionException('Dit verzoek kun je niet (meer) bewerken; het is intussen ingediend of beoordeeld.');
+        }
+        throw new ThothActionException('Opslaan mislukt; herlaad de pagina.');
+    }
 
     return thoth_get_request($id);
 }
@@ -200,7 +222,8 @@ function thoth_approve(int $id, string $approver, ?callable $inserter = null): a
     }
     try {
         $request = thoth_get_request($id);
-        if ($request === null || $request['status'] !== THOTH_STATUS_SUBMITTED) {
+        // 'In behandeling' met vrije lock = vastgelopen eerdere poging: mag worden afgerond.
+        if ($request === null || !in_array($request['status'], [THOTH_STATUS_SUBMITTED, THOTH_STATUS_PROCESSING], true)) {
             throw new ThothActionException('Alleen ingediende verzoeken kunnen worden goedgekeurd.');
         }
         if (thoth_is_owner($request, $approver)) {
@@ -212,13 +235,23 @@ function thoth_approve(int $id, string $approver, ?callable $inserter = null): a
             thoth_record_bc_error($id, $msg);
             return ['ok' => false, 'error' => $msg];
         }
+        // Atomaire claim vóór de BC-call: lukt alleen als niemand intussen heeft afgewezen.
+        $claim = thoth_db()->prepare('UPDATE requests SET status = ?, updated_at = ? WHERE id = ? AND status IN (?, ?)');
+        $claim->execute([THOTH_STATUS_PROCESSING, thoth_now(), $id, THOTH_STATUS_SUBMITTED, THOTH_STATUS_PROCESSING]);
+        if ($claim->rowCount() !== 1) {
+            throw new ThothActionException('Dit verzoek is intussen beoordeeld door een andere goedkeurder.');
+        }
+        $release = static function (string $msg) use ($id): void {
+            thoth_db()->prepare('UPDATE requests SET status = ?, bc_error = ?, updated_at = ? WHERE id = ? AND status = ?')
+                ->execute([THOTH_STATUS_SUBMITTED, $msg, thoth_now(), $id, THOTH_STATUS_PROCESSING]);
+        };
         $context = thoth_request_context($request, 'goedkeuren');
         try {
             [$data, $derivedErrors] = thoth_resolve_derived($config, $request['data'], $context);
             $fieldErrors = $derivedErrors + thoth_validate_values($config, $data, $context);
             if ($fieldErrors !== []) {
                 $msg = 'Validatie mislukt: ' . implode(' ', $fieldErrors);
-                thoth_record_bc_error($id, $msg);
+                $release($msg);
                 return ['ok' => false, 'error' => $msg, 'fields' => $fieldErrors];
             }
             $payload = thoth_build_bc_payload($config, $data, $context);
@@ -236,20 +269,26 @@ function thoth_approve(int $id, string $approver, ?callable $inserter = null): a
             $result = $inserter($config, (string) $request['environment'], (string) $request['company'], $payload, $options);
         } catch (Throwable $e) {
             $msg = 'Aanmaken in BC mislukt: ' . $e->getMessage();
-            thoth_record_bc_error($id, $msg);
+            $release($msg);
             return ['ok' => false, 'error' => $msg];
         }
         $number = (string) $result['number'];
-        thoth_db()->prepare('UPDATE requests SET status = ?, bc_number = ?, bc_error = NULL, decided_by = ?, decided_at = ?, updated_at = ? WHERE id = ? AND status = ?')
-            ->execute([THOTH_STATUS_APPROVED, $number, strtolower($approver), thoth_now(), thoth_now(), $id, THOTH_STATUS_SUBMITTED]);
+        // Afgeleide waarden (coördinaten, Omschrijving 2) bewaren zoals ze naar BC zijn gestuurd.
+        $done = thoth_db()->prepare('UPDATE requests SET status = ?, bc_number = ?, bc_error = NULL, data_json = ?, decided_by = ?, decided_at = ?, updated_at = ? WHERE id = ? AND status = ?');
+        $done->execute([THOTH_STATUS_APPROVED, $number, json_encode($data, JSON_UNESCAPED_UNICODE), strtolower($approver), thoth_now(), thoth_now(), $id, THOTH_STATUS_PROCESSING]);
+        if ($done->rowCount() !== 1) {
+            // Kan alleen bij handmatig ingrijpen in de database; BC-record bestaat wel.
+            thoth_record_bc_error($id, 'Aangemaakt in BC als ' . $number . ', maar de status kon niet worden bijgewerkt.');
+            return ['ok' => false, 'error' => 'Aangemaakt in BC als ' . $number . ', maar het verzoek was intussen gewijzigd. Controleer het verzoek.'];
+        }
         thoth_add_history($id, strtolower($approver), THOTH_STATUS_SUBMITTED, THOTH_STATUS_APPROVED, 'BC-nummer ' . $number
             . (($result['recovered'] ?? false) ? ' (na time-out teruggevonden in BC, geen tweede POST)' : ''));
 
         return ['ok' => true, 'number' => $number];
     } finally {
+        // Lockbestand niet verwijderen: unlink na unlock laat een tweede proces een nieuw bestand locken.
         flock($lock, LOCK_UN);
         fclose($lock);
-        @unlink(thoth_data_dir() . '/approve-' . $id . '.lock');
     }
 }
 
@@ -337,6 +376,22 @@ function thoth_companies(bool $refresh = false, ?callable $discover = null): arr
     usort($out, static fn ($a, $b) => [$b['live'], $a['label']] <=> [$a['live'], $b['label']]);
 
     return $out;
+}
+
+/**
+ * Bedrijf uit de formulierwaarde voor opslaan: [naam, environment].
+ * Leeg = wissen (['','']); onbekende sleutel (bv. bedrijf niet meer in de lijst) = niet wijzigen ([null, null]).
+ *
+ * @return array{0: ?string, 1: ?string}
+ */
+function thoth_company_from_key(string $key, array $companies): array
+{
+    if (trim($key) === '') {
+        return ['', ''];
+    }
+    $company = thoth_company_by_key($key, $companies);
+
+    return $company === null ? [null, null] : [$company['name'], $company['environment']];
 }
 
 function thoth_company_by_key(string $key, array $companies): ?array

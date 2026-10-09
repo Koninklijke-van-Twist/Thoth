@@ -15,7 +15,9 @@
   var statusEl = document.getElementById('kaart-status');
   var applyBtn = document.getElementById('kaart-overnemen');
   var map = null, marker = null, picked = null;
-  var lastRequest = 0, searchTimer = null, reverseTimer = null, seq = 0;
+  var lastRequest = 0, searchTimer = null, reverseTimer = null;
+  // Aparte tellers: een zoekopdracht mag een lopende adres-opzoeking niet ongeldig maken (en omgekeerd).
+  var searchSeq = 0, reverseSeq = 0;
 
   function el(role) { return roles[role] ? document.getElementById(roles[role]) : null; }
   function val(role) { var e = el(role); return e ? e.value.trim() : ''; }
@@ -38,7 +40,7 @@
     var parts = [p.adres, [p.postcode, p.plaats].filter(Boolean).join(' '), p.land].filter(Boolean);
     var text = (parts.length ? parts.join(', ') : 'Geen adres gevonden') + ' · ' + p.lat + ', ' + p.lon;
     if (roles.land && p.land && allowed.indexOf(p.land) === -1) {
-      text += ' · Let op: land ' + p.land + ' staat niet in de lijst (' + allowed.join('/') + '); het land wordt niet ingevuld.';
+      text += ' · Let op: land ' + p.land + ' staat niet in de lijst (' + allowed.join('/') + '); het land wordt leeggemaakt.';
     }
     return text;
   }
@@ -54,24 +56,26 @@
 
   function pickPoint(lat, lon) {
     placeMarker(lat, lon);
-    picked = { lat: coord(lat), lon: coord(lon), adres: '', postcode: '', plaats: '', land: '' };
+    // adresBekend=false: alleen coördinaten overnemen, bestaande adresvelden laten staan.
+    picked = { lat: coord(lat), lon: coord(lon), adres: '', postcode: '', plaats: '', land: '', adresBekend: false };
     applyBtn.disabled = false;
     setStatus('Adres opzoeken… · ' + picked.lat + ', ' + picked.lon);
     clearTimeout(reverseTimer);
-    var mine = ++seq;
+    var mine = ++reverseSeq;
     reverseTimer = setTimeout(function () {
       geo({ actie: 'geo-adres', lat: picked.lat, lon: picked.lon }).then(function (json) {
-        if (mine !== seq) { return; }
-        if (json.adres) { picked = json.adres; }
+        if (mine !== reverseSeq) { return; }
+        if (json.adres) { picked = json.adres; picked.adresBekend = true; }
         setStatus(describe(picked));
-      }).catch(function (e) { if (mine === seq) { setStatus('Adres niet gevonden (' + e.message + '); alleen de coördinaten worden overgenomen.'); } });
+      }).catch(function (e) { if (mine === reverseSeq) { setStatus('Adres niet gevonden (' + e.message + '); alleen de coördinaten worden overgenomen.'); } });
     }, 500);
   }
 
   function pickResult(r) {
-    seq++;
+    reverseSeq++; // lopende adres-opzoeking van een eerdere klik negeren
     clearTimeout(reverseTimer);
     picked = r;
+    picked.adresBekend = true;
     placeMarker(parseFloat(r.lat), parseFloat(r.lon));
     map.setView([parseFloat(r.lat), parseFloat(r.lon)], 17);
     applyBtn.disabled = false;
@@ -82,9 +86,9 @@
   function search() {
     var q = searchEl.value.trim();
     if (q.length < 3) { resultsEl.hidden = true; return; }
-    var mine = ++seq;
+    var mine = ++searchSeq;
     geo({ actie: 'geo-zoek', q: q }).then(function (json) {
-      if (mine !== seq) { return; }
+      if (mine !== searchSeq) { return; }
       resultsEl.innerHTML = '';
       if (!json.resultaten.length) {
         resultsEl.innerHTML = '<li class="combo-empty">Geen resultaten</li>';
@@ -97,13 +101,14 @@
         resultsEl.appendChild(li);
       });
       resultsEl.hidden = false;
-    }).catch(function (e) { if (mine === seq) { setStatus('Zoeken mislukt: ' + e.message); } });
+    }).catch(function (e) { if (mine === searchSeq) { setStatus('Zoeken mislukt: ' + e.message); } });
   }
 
   function setField(role, value) {
     var e = el(role);
-    if (!e || value === '' || value === undefined || value === null) { return; }
-    if (e.tagName === 'SELECT') {
+    if (!e) { return; }
+    value = value === undefined || value === null ? '' : String(value);
+    if (e.tagName === 'SELECT' && value !== '') {
       var ok = Array.prototype.some.call(e.options, function (o) { return o.value === value; });
       if (!ok) { return; }
     }
@@ -158,10 +163,13 @@
     if (!picked) { return; }
     setField('lat', picked.lat);
     setField('lon', picked.lon);
-    setField('adres', picked.adres);
-    setField('postcode', picked.postcode);
-    setField('plaats', picked.plaats);
-    if (picked.land && allowed.indexOf(picked.land) !== -1) { setField('land', picked.land); }
+    if (picked.adresBekend) {
+      // Ook lege waarden schrijven, anders blijft een oud adres naast nieuwe coördinaten staan.
+      setField('adres', picked.adres);
+      setField('postcode', picked.postcode);
+      setField('plaats', picked.plaats);
+      setField('land', picked.land && allowed.indexOf(picked.land) !== -1 ? picked.land : '');
+    }
     dialog.close();
   });
 })();
