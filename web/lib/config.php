@@ -20,6 +20,11 @@ declare(strict_types=1);
  *      Alleen {"veld"}: kopie van de waarde van dat formulierveld (afgekapt op maxLengte).
  *  - optiesBron."afhankelijkVan": {"veld", "kolom"}: suggesties alleen uit rijen waarvan
  *      "kolom" gelijk is aan de huidige waarde van formulierveld "veld" (leeg = geen filter).
+ *  - "overschrijfbaar": true bij een automatisch veld: de gebruiker mag zelf een waarde zetten
+ *      (via de kaartkiezer); leeg = automatisch zoals hierboven.
+ *  - "kaartKiezer": {"lat", "lon", "adres"?, "postcode"?, "plaats"?, "land"?} op het hoogste niveau:
+ *      knop 'Kies op kaart' (OpenStreetMap) die deze velden (bc-kolommen) vult. lat/lon worden
+ *      gecontroleerd als coördinaat (punt als decimaalteken). "land" vult alleen een toegestane optie.
  *  - "bcGeblokkeerd": "<melding>" op het hoogste niveau: aanmaken in BC kan (nog) niet,
  *    bv. omdat een veld in BC niet bewerkbaar is. Indienen kan wel; goedkeuren faalt
  *    dan vóór elke BC-call met deze melding en het verzoek blijft Ingediend.
@@ -231,6 +236,7 @@ function thoth_validate_config(array $raw, string $source = 'config'): array
             'restricties' => $rules,
             'maxLengte' => $maxLength,
             'afgeleidVan' => $derived,
+            'overschrijfbaar' => $type === 'automatisch' && ($f['overschrijfbaar'] ?? false) === true,
         ];
     }
 
@@ -258,6 +264,34 @@ function thoth_validate_config(array $raw, string $source = 'config'): array
         }
     }
 
+    $mapPicker = null;
+    if (array_key_exists('kaartKiezer', $raw)) {
+        $mp = $raw['kaartKiezer'];
+        $known = array_column($normalized, null, 'key');
+        if (!is_array($mp) || !is_string($mp['lat'] ?? null) || !is_string($mp['lon'] ?? null)) {
+            $errors[] = '"kaartKiezer" moet minimaal {"lat", "lon"} bevatten.';
+        } else {
+            $mapPicker = [];
+            foreach (['lat', 'lon', 'adres', 'postcode', 'plaats', 'land'] as $role) {
+                $ref = $mp[$role] ?? null;
+                if ($ref === null) {
+                    continue;
+                }
+                if (!is_string($ref) || !isset($known[$ref])) {
+                    $errors[] = 'kaartKiezer."' . $role . '" verwijst niet naar een veld (bc-kolom) van dit formulier.';
+                    continue;
+                }
+                if ($known[$ref]['invoerType'] === 'automatisch' && !$known[$ref]['overschrijfbaar']) {
+                    $errors[] = 'kaartKiezer."' . $role . '" ' . $ref . ' is automatisch en niet "overschrijfbaar".';
+                }
+                $mapPicker[$role] = $ref;
+            }
+            foreach (array_diff(array_keys($mp), ['lat', 'lon', 'adres', 'postcode', 'plaats', 'land']) as $extra) {
+                $errors[] = 'kaartKiezer: onbekende sleutel "' . $extra . '".';
+            }
+        }
+    }
+
     if (count($tables) > 1) {
         $errors[] = 'Meerdere bc-tabellen in één formulier (' . implode(', ', array_keys($tables))
             . ') worden in v1 niet ondersteund. Alle velden moeten dezelfde "bc-tabel" hebben.';
@@ -277,6 +311,7 @@ function thoth_validate_config(array $raw, string $source = 'config'): array
         'voorbeeld' => ($raw['_voorbeeld'] ?? null) !== null,
         'voorbeeldNotitie' => is_string($raw['_voorbeeld'] ?? null) ? $raw['_voorbeeld'] : '',
         'bcGeblokkeerd' => is_string($blocked) ? trim($blocked) : null,
+        'kaartKiezer' => $mapPicker,
         'formFields' => $normalized,
     ];
 }

@@ -76,7 +76,7 @@ function thoth_header(string $title, string $active = ''): void
     echo '<!doctype html><html lang="nl"><head><meta charset="utf-8">'
         . '<meta name="viewport" content="width=device-width, initial-scale=1">'
         . '<title>' . h($title) . ' · Thoth</title>'
-        . '<link rel="stylesheet" href="assets/app.css?v=1"></head><body>'
+        . '<link rel="stylesheet" href="assets/app.css?v=2"></head><body>'
         . '<header class="top"><div class="wrap top-inner"><a class="brand" href="index.php">Thoth</a><nav>'
         . '<a href="index.php"' . ($active === 'overzicht' ? ' class="active"' : '') . '>Mijn verzoeken</a>'
         . ($isApprover ? '<a href="goedkeuren.php"' . ($active === 'goedkeuren' ? ' class="active"' : '') . '>Goedkeuren</a>' : '')
@@ -88,5 +88,5 @@ function thoth_header(string $title, string $active = ''): void
 
 function thoth_footer(): void
 {
-    echo '</main><script src="assets/app.js?v=1"></script></body></html>';
+    echo '</main><script src="assets/app.js?v=2"></script></body></html>';
 }

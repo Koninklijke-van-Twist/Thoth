@@ -6,6 +6,14 @@
   "autoIncrementNumberPadding": 5,
   "autoIncrementPrefixYear": true,
   "autoIncrementStrategie": "max+1",
+  "kaartKiezer": {
+    "lat": "KVT_Latitude_Coordinate__x005B_DD_x005D_",
+    "lon": "KVT_Longitude_Coordinate__x005B_DD_x005D_",
+    "adres": "KVT_Address",
+    "postcode": "KVT_Post_Code",
+    "plaats": "KVT_City",
+    "land": "KVT_Country_Region_Code"
+  },
   "formFields": [
     {
       "name": "Servicelocatienaam",
@@ -146,19 +154,21 @@
     },
     {
       "name": "Breedtegraad [DD]",
-      "placeholder": "Bijv. 52.15547 (punt, geen komma)",
+      "placeholder": "Bijv. 52.283847 (of kies op kaart)",
       "invoerType": "tekst",
       "bc-tabel": "LVS_MainEntityCard",
       "bc-kolom": "KVT_Latitude_Coordinate__x005B_DD_x005D_",
-      "verplicht": false
+      "verplicht": false,
+      "maxLengte": 30
     },
     {
       "name": "Lengtegraad [DD]",
-      "placeholder": "Bijv. 4.63421 (punt, geen komma)",
+      "placeholder": "Bijv. 4.771827 (of kies op kaart)",
       "invoerType": "tekst",
       "bc-tabel": "LVS_MainEntityCard",
       "bc-kolom": "KVT_Longitude_Coordinate__x005B_DD_x005D_",
-      "verplicht": false
+      "verplicht": false,
+      "maxLengte": 30
     },
     {
       "name": "Veiligheidstekst",

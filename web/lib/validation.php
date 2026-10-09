@@ -53,6 +53,18 @@ function thoth_input_type_rules(): array
     ];
 }
 
+/** Breedte- of lengtegraad in decimale graden met een punt, binnen het bereik. */
+function thoth_coordinate_error(string $value, string $role): ?string
+{
+    $max = $role === 'lat' ? 90 : 180;
+    if (!preg_match('/^-?\d{1,3}(\.\d{1,12})?$/', trim($value)) || abs((float) $value) > $max) {
+        return 'moet een ' . ($role === 'lat' ? 'breedtegraad' : 'lengtegraad') . ' in decimale graden zijn (bv. '
+            . ($role === 'lat' ? '52.283847' : '4.771827') . ', punt als decimaalteken, max ' . $max . ').';
+    }
+
+    return null;
+}
+
 function thoth_value_is_empty(mixed $value): bool
 {
     return $value === null || (is_string($value) && trim($value) === '');
@@ -71,7 +83,8 @@ function thoth_validate_values(array $config, array $values, array $context): ar
     foreach ($config['formFields'] as $field) {
         $key = $field['key'];
         $value = $values[$key] ?? null;
-        if ($field['invoerType'] === 'automatisch' && ($context['moment'] ?? '') !== 'goedkeuren') {
+        if ($field['invoerType'] === 'automatisch' && ($context['moment'] ?? '') !== 'goedkeuren'
+            && (!($field['overschrijfbaar'] ?? false) || thoth_value_is_empty($value))) {
             continue; // wordt pas bij goedkeuren bepaald (thoth_resolve_derived)
         }
         if (thoth_value_is_empty($value)) {
@@ -83,6 +96,11 @@ function thoth_validate_values(array $config, array $values, array $context): ar
         $value = is_string($value) ? trim($value) : $value;
         if (($field['maxLengte'] ?? null) !== null && mb_strlen((string) $value) > $field['maxLengte']) {
             $errors[$key] = $field['name'] . ' is te lang (max ' . $field['maxLengte'] . ' tekens).';
+            continue;
+        }
+        $coordRole = array_search($key, array_intersect_key($config['kaartKiezer'] ?? [], ['lat' => 1, 'lon' => 1]), true);
+        if ($coordRole !== false && ($msg = thoth_coordinate_error((string) $value, $coordRole)) !== null) {
+            $errors[$key] = $field['name'] . ' ' . $msg;
             continue;
         }
         foreach ($typeRules[$field['invoerType']] ?? [] as $rule) {
@@ -285,6 +303,10 @@ function thoth_resolve_derived(array $config, array $values, array $context): ar
         $sourceField = $byKey[$src['veld']] ?? null;
         $sourceName = $sourceField['name'] ?? $src['veld'];
         $keyValue = trim((string) ($values[$src['veld']] ?? ''));
+        if (($field['overschrijfbaar'] ?? false) && !thoth_value_is_empty($values[$key] ?? null)) {
+            $values[$key] = trim((string) $values[$key]); // door de gebruiker gekozen (kaart): niet overschrijven
+            continue;
+        }
         $values[$key] = '';
         if ($src['bc-tabel'] === null) {
             $values[$key] = ($field['maxLengte'] ?? null) !== null ? mb_substr($keyValue, 0, $field['maxLengte']) : $keyValue;

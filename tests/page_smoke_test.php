@@ -59,7 +59,24 @@ check(str_contains($body, 'automatisch overgenomen uit Servicelocatie (LVS_MainE
 check(str_contains($body, 'maxlength="50"'), 'maxlength op tekstvelden');
 check(str_contains($body, 'data-ouder="Manufacturer_Code"'), 'model-suggesties afhankelijk van producent');
 check(str_contains($body, 'automatisch overgenomen uit Model producent.'), 'omschrijving 2 uit model');
-check(!str_contains($body, 'name="v[KVT_Latitude_Coordinate__x005B_DD_x005D_]"'), 'automatisch veld wordt niet ingestuurd');
+check(str_contains($body, 'name="v[KVT_Latitude_Coordinate__x005B_DD_x005D_]" value="" readonly'), 'overschrijfbare coördinaat: readonly en ingestuurd');
+check(!str_contains($body, 'name="v[Description_2]"'), 'niet-overschrijfbaar automatisch veld wordt niet ingestuurd');
+check(str_contains($body, 'data-kaart-open') && str_contains($body, 'data-kaart-wis'), 'component: kaartknop en terug naar automatisch');
+
+[$s, $body] = http('GET', 'verzoek.php?type=servicelocatie');
+check(str_contains($body, 'Kies op kaart') && str_contains($body, 'id="kaart-dialog"'), 'servicelocatie: kaartknop en modal');
+check(str_contains($body, 'assets/vendor/leaflet/leaflet.js') && str_contains($body, 'assets/vendor/leaflet/leaflet.css') && !str_contains($body, 'unpkg'), 'Leaflet lokaal, geen CDN');
+check(str_contains($body, 'data-kaart-landen="NL,BE,DE,IT,FI,PL"'), 'toegestane landen naar de kaart');
+check(str_contains($body, '&quot;adres&quot;:&quot;f_KVT_Address&quot;'), 'kaart vult KVT_Address');
+$ch = curl_init('http://127.0.0.1:' . $port . '/verzoek.php?type=servicelocatie');
+curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_HEADER => true, CURLOPT_NOBODY => true, CURLOPT_COOKIEFILE => $jar]);
+$hdr = (string) curl_exec($ch);
+curl_close($ch);
+check(preg_match("/Content-Security-Policy: [^\r\n]*img-src 'self' data: https:\/\/tile\.openstreetmap\.org/i", $hdr) === 1, 'CSP staat OSM-tegels toe');
+check(preg_match("/Content-Security-Policy: [^\r\n]*connect-src 'self'/i", $hdr) === 1 && stripos($hdr, 'Referrer-Policy: strict-origin-when-cross-origin') !== false, 'CSP connect-src self (Nominatim via api.php) en Referrer-Policy');
+foreach (['assets/kaart.js', 'assets/vendor/leaflet/leaflet.js', 'assets/vendor/leaflet/images/marker-icon.png'] as $asset) {
+    check_same(200, http('GET', $asset)[0], "$asset bereikbaar");
+}
 
 [$s, $body] = http('POST', 'api.php', ['actie' => 'opslaan', 'type' => 'servicelocatie', 'v' => ['Name' => 'Test']]);
 check_same(400, $s, 'autosave zonder CSRF geweigerd');

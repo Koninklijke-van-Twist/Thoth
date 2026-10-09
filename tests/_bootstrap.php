@@ -26,6 +26,7 @@ require_once $web . '/store.php';
 require_once $web . '/bc.php';
 require_once $web . '/validation.php';
 require_once $web . '/requests.php';
+require_once $web . '/geo.php';
 
 $GLOBALS['thothTestCount'] = 0;
 $GLOBALS['thothTestFailures'] = 0;

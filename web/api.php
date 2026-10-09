@@ -6,6 +6,7 @@ declare(strict_types=1);
  * JSON-endpoints voor het formulier.
  *   POST actie=opslaan   debounced autosave (CSRF verplicht), maakt zo nodig een Concept aan.
  *   GET  actie=zoek      suggesties voor combobox/lookup (type, veld, bedrijf, q, optioneel ouder).
+ *   GET  actie=geo-zoek  adres zoeken (q) en actie=geo-adres omgekeerd geocoderen (lat, lon), via Nominatim (lib/geo.php).
  */
 
 require_once __DIR__ . '/lib/bootstrap.php';
@@ -46,6 +47,15 @@ try {
         $context = ['company' => $company['name'], 'environment' => $company['environment'], 'moment' => 'opslaan'];
         $parent = mb_substr((string) ($_GET['ouder'] ?? ''), 0, 250);
         thoth_json(['ok' => true, 'resultaten' => thoth_search_options($field, $q, $context, 20, $parent)]);
+    }
+    if ($action === 'geo-zoek') {
+        thoth_json(['ok' => true, 'resultaten' => thoth_geo_search((string) ($_GET['q'] ?? ''))]);
+    }
+    if ($action === 'geo-adres') {
+        if (!is_numeric($_GET['lat'] ?? null) || !is_numeric($_GET['lon'] ?? null)) {
+            thoth_json(['ok' => false, 'fout' => 'Ongeldige coördinaten.'], 400);
+        }
+        thoth_json(['ok' => true, 'adres' => thoth_geo_reverse((float) $_GET['lat'], (float) $_GET['lon'])]);
     }
     thoth_json(['ok' => false, 'fout' => 'Onbekende actie.'], 400);
 } catch (ThothActionException | ThothConfigException $e) {
