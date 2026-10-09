@@ -109,6 +109,10 @@
       var mine = ++seq;
       var url = 'api.php?actie=zoek&type=' + encodeURIComponent(form.dataset.type) + '&veld=' + encodeURIComponent(combo.dataset.veld)
         + '&bedrijf=' + encodeURIComponent(bedrijf) + '&q=' + encodeURIComponent(input.value);
+      if (combo.dataset.ouder) {
+        var parentEl = form.querySelector('[name="v[' + combo.dataset.ouder + ']"]');
+        if (parentEl && parentEl.value) { url += '&ouder=' + encodeURIComponent(parentEl.value); }
+      }
       fetch(url, { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (json) {
         if (mine !== seq) { return; }
         list.innerHTML = '';

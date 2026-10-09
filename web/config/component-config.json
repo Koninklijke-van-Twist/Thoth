@@ -1,6 +1,6 @@
 {
-  "_bron": "Echte BC-webservice AppComponentCard = page 11332880 'LVS_Component Card' (Componentkaart) op tabel 11332871 'LVS_Component' (BC page 810 + Pagina-inspectie). Velden uit Mímir-metadata kvtmdlive_aad (09-10-2026); bewerkbaarheid uit OData-$metadata. Nummer: COM10 + 5 cijfers zonder jaar (bv. COM1002171), KVT. Equipmentsoorten = alle Sub_Entity-codes die in KVT-componenten voorkomen (de Sub Entity-tabel zelf is niet gepubliceerd).",
-  "_todo": "1) Main_Entity is op AppComponentCard AllowEdit=false/AllowEditOnCreate=false; Iris vraagt de LVS-partner dit bewerkbaar te maken. Daarna 'bcGeblokkeerd' verwijderen en eerst testen op kvtfat_aad. 2) Nummerreeks: zelfde risico als bij ME (BC-reeks loopt niet mee). Hunter van Twist gebruikt COM05: deze config is voor KVT. 3) Producentencode: de Manufacturer-tabel is niet gepubliceerd; suggesties komen uit gebruikte codes, BC valideert bij goedkeuren. 4) Draaiuren (Curr_Running_Hrs_Registered) is alleen-lezen en dus weggelaten.",
+  "_bron": "Echte BC-webservice AppComponentCard = page 11332880 'LVS_Component Card' op tabel 11332871 'LVS_Component'. Velden volgens Tims veldspecificatie (09-10-2026), gecontroleerd tegen OData-$metadata kvtmdlive_aad: Description 100, Description_2 50, Serial_No 50, KVT_Place_On_Location 50, Manufacturer_Code 10, Manufacturer_Model 50 (Tims 'Model_Code' heet in BC Manufacturer_Model), coördinaten KVT_Latitude/Longitude_Coordinate__x005B_DD_x005D_ (30). Er is geen apart Name-veld op AppComponentCard, LVS_Componenten of ComponentOverview.",
+  "_todo": "1) Main_Entity is op AppComponentCard AllowEdit=false; daarna 'bcGeblokkeerd' verwijderen en eerst testen op kvtfat_aad. 2) Niet gepubliceerd (Ariadne): LVS Sub Entity, Manufacturer (BC-tabel 5720) en LVS Manufacturer Model. Tot die er zijn: Equipmentsoort = vaste lijst gebruikte codes, Producentencode = gebruikte codes, Model = unieke modellen uit bestaande componenten (AppComponentCard), gefilterd op gekozen producent. Omschrijving 2 = kopie van het gekozen model (in BC is Description_2 vrijwel altijd gelijk aan Manufacturer_Model); vervangen door de omschrijving uit de modeltabel zodra die gepubliceerd is. 3) ProjectNr (Tim): kenmerk '90 KVT PROJECT' in AppComponentCardFeatures (Source_Type 11332871, Source_ID = componentnr.), een tweede tabel: nog niet in v1. 4) 'Naam' uit Tims lijst: geen apart naamveld gevonden, weggelaten; Omschrijving = Description. 5) Nummerreeks: BC-reeks loopt niet mee; KVT-config (COM10).",
   "bcGeblokkeerd": "Het veld Servicelocatie (Main_Entity) op de BC-componentkaart (AppComponentCard, page 11332880) is nog niet bewerkbaar. De LVS-partner is gevraagd dat aan te passen. Je kunt de aanvraag wel indienen; goedkeuren en aanmaken in BC kan pas daarna.",
   "auto-increment-field": "No",
   "autoIncrementPrefix": "COM10",
@@ -39,6 +39,7 @@
       "bc-tabel": "AppComponentCard",
       "bc-kolom": "Sub_Entity",
       "verplicht": true,
+      "maxLengte": 20,
       "opties": [
         "ANTI SIPHON VALVE",
         "BOW TRUSTER",
@@ -88,19 +89,12 @@
     },
     {
       "name": "Omschrijving",
-      "placeholder": "Bijv. Control panel",
+      "placeholder": "Bijv. Control panel (max 100 tekens)",
       "invoerType": "tekst",
       "bc-tabel": "AppComponentCard",
       "bc-kolom": "Description",
-      "verplicht": true
-    },
-    {
-      "name": "Omschrijving 2",
-      "placeholder": "Optioneel (max 50 tekens)",
-      "invoerType": "tekst",
-      "bc-tabel": "AppComponentCard",
-      "bc-kolom": "Description_2",
-      "verplicht": false
+      "verplicht": true,
+      "maxLengte": 100
     },
     {
       "name": "Producentencode",
@@ -108,7 +102,8 @@
       "invoerType": "combobox",
       "bc-tabel": "AppComponentCard",
       "bc-kolom": "Manufacturer_Code",
-      "verplicht": false,
+      "verplicht": true,
+      "maxLengte": 10,
       "opties": [
         "INDUSTRIAL",
         "EPG 400",
@@ -143,11 +138,39 @@
     },
     {
       "name": "Model producent",
-      "placeholder": "Bijv. 404D-22T",
-      "invoerType": "tekst",
+      "placeholder": "Typ om te zoeken, bijv. 404D-22T",
+      "invoerType": "combobox",
       "bc-tabel": "AppComponentCard",
       "bc-kolom": "Manufacturer_Model",
-      "verplicht": false
+      "verplicht": true,
+      "maxLengte": 50,
+      "optiesBron": {
+        "bc-tabel": "AppComponentCard",
+        "waarde-kolom": "Manufacturer_Model",
+        "label-kolommen": [
+          "Manufacturer_Code"
+        ],
+        "zoek-kolommen": [
+          "Manufacturer_Model"
+        ],
+        "filter": "Manufacturer_Model ne ''",
+        "afhankelijkVan": {
+          "veld": "Manufacturer_Code",
+          "kolom": "Manufacturer_Code"
+        }
+      }
+    },
+    {
+      "name": "Omschrijving 2",
+      "placeholder": "",
+      "invoerType": "automatisch",
+      "bc-tabel": "AppComponentCard",
+      "bc-kolom": "Description_2",
+      "verplicht": false,
+      "maxLengte": 50,
+      "afgeleidVan": {
+        "veld": "Manufacturer_Model"
+      }
     },
     {
       "name": "Serienr.",
@@ -155,23 +178,47 @@
       "invoerType": "tekst",
       "bc-tabel": "AppComponentCard",
       "bc-kolom": "Serial_No",
-      "verplicht": true
+      "verplicht": true,
+      "maxLengte": 50
     },
     {
-      "name": "Softwareversie",
-      "placeholder": "Optioneel",
+      "name": "Breedtegraad",
+      "placeholder": "",
+      "invoerType": "automatisch",
+      "bc-tabel": "AppComponentCard",
+      "bc-kolom": "KVT_Latitude_Coordinate__x005B_DD_x005D_",
+      "verplicht": true,
+      "maxLengte": 30,
+      "afgeleidVan": {
+        "veld": "Main_Entity",
+        "bc-tabel": "LVS_MainEntityCard",
+        "sleutel-kolom": "No",
+        "kolom": "KVT_Latitude_Coordinate__x005B_DD_x005D_"
+      }
+    },
+    {
+      "name": "Lengtegraad",
+      "placeholder": "",
+      "invoerType": "automatisch",
+      "bc-tabel": "AppComponentCard",
+      "bc-kolom": "KVT_Longitude_Coordinate__x005B_DD_x005D_",
+      "verplicht": true,
+      "maxLengte": 30,
+      "afgeleidVan": {
+        "veld": "Main_Entity",
+        "bc-tabel": "LVS_MainEntityCard",
+        "sleutel-kolom": "No",
+        "kolom": "KVT_Longitude_Coordinate__x005B_DD_x005D_"
+      }
+    },
+    {
+      "name": "Plaatsing op locatie",
+      "placeholder": "Optioneel, bijv. kelder ruimte 2 (max 50 tekens)",
       "invoerType": "tekst",
       "bc-tabel": "AppComponentCard",
-      "bc-kolom": "Software_Version",
-      "verplicht": false
-    },
-    {
-      "name": "Installatiedatum",
-      "placeholder": "",
-      "invoerType": "date",
-      "bc-tabel": "AppComponentCard",
-      "bc-kolom": "Date_of_Installation",
-      "verplicht": false
+      "bc-kolom": "KVT_Place_On_Location",
+      "verplicht": false,
+      "maxLengte": 50
     }
   ]
 }

@@ -55,6 +55,11 @@ check(!str_contains($body, 'Voorbeeldconfig') && str_contains($body, 'Inzenden')
 [$s, $body] = http('GET', 'verzoek.php?type=component');
 check(str_contains($body, 'data-strikt="1"'), 'component heeft strikte lookup');
 check(str_contains($body, 'Aanmaken in BC kan nog niet'), 'component toont blokkade-melding');
+check(str_contains($body, 'automatisch overgenomen uit Servicelocatie (LVS_MainEntityCard)'), 'coördinaten tonen automatisch-hint');
+check(str_contains($body, 'maxlength="50"'), 'maxlength op tekstvelden');
+check(str_contains($body, 'data-ouder="Manufacturer_Code"'), 'model-suggesties afhankelijk van producent');
+check(str_contains($body, 'automatisch overgenomen uit Model producent.'), 'omschrijving 2 uit model');
+check(!str_contains($body, 'name="v[KVT_Latitude_Coordinate__x005B_DD_x005D_]"'), 'automatisch veld wordt niet ingestuurd');
 
 [$s, $body] = http('POST', 'api.php', ['actie' => 'opslaan', 'type' => 'servicelocatie', 'v' => ['Name' => 'Test']]);
 check_same(400, $s, 'autosave zonder CSRF geweigerd');
