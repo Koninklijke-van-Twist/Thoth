@@ -72,6 +72,45 @@ function analytics_authorize(string $email, string $apiKey, string $oid): bool
     return function_exists('verify_rotating_api_key') && verify_rotating_api_key($oid, $apiKey);
 }
 
+/**
+ * analytics.php moet bereikbaar blijven. Alleen sqlite-bestanden (inclusief
+ * -wal/-shm/-journal) weigeren, zoals Clio's kvt_protect_dirs. Ontbreekt
+ * .htaccess, dan wordt die aangemaakt; een bestaand bestand zonder sqlite-regel
+ * krijgt de weigering erbij. Een bestand dat sqlite al noemt blijft onaangeroerd.
+ */
+function analytics_htaccess_rules(): string
+{
+    return "Options -Indexes\n"
+        . "<FilesMatch \"\\.(sqlite|sqlite3|db)(-wal|-shm|-journal)?$\">\n"
+        . "    <IfModule mod_authz_core.c>\n"
+        . "        Require all denied\n"
+        . "    </IfModule>\n"
+        . "    <IfModule !mod_authz_core.c>\n"
+        . "        Order allow,deny\n"
+        . "        Deny from all\n"
+        . "    </IfModule>\n"
+        . "</FilesMatch>\n";
+}
+
+function analytics_ensure_htaccess(): void
+{
+    $dir = dirname(ANALYTICS_DB_PATH);
+    if (!is_dir($dir)) {
+        return;
+    }
+
+    $ht = $dir . '/.htaccess';
+    $deny = analytics_htaccess_rules();
+    $current = is_file($ht) ? (string) @file_get_contents($ht) : null;
+    if ($current === null) {
+        if (is_writable($dir)) {
+            @file_put_contents($ht, $deny, LOCK_EX);
+        }
+    } elseif (stripos($current, 'sqlite') === false && is_writable($ht)) {
+        @file_put_contents($ht, rtrim($current) . "\n\n# kvt_protect_dirs\n" . $deny, LOCK_EX);
+    }
+}
+
 function analytics_ensure_db_writable(): void
 {
     $dir = dirname(ANALYTICS_DB_PATH);
@@ -84,6 +123,8 @@ function analytics_ensure_db_writable(): void
     if (!is_writable($dir)) {
         throw new RuntimeException('Analytics directory is not writable');
     }
+
+    analytics_ensure_htaccess();
 
     if (!is_file(ANALYTICS_DB_PATH)) {
         $created = @touch(ANALYTICS_DB_PATH);
@@ -180,6 +221,8 @@ function analytics_record_visit(string $email): void
 /**
  * Page load
  */
+
+analytics_ensure_htaccess();
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'GET' && ($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
     analytics_json(['ok' => false, 'error' => 'Method not allowed'], 405);
