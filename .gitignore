@@ -10,6 +10,9 @@ web/data/*
 !web/data/.htaccess
 web/cache/
 
+web/analytics/analytics.sqlite
+web/analytics/analytics.sqlite-*
+
 # OS-rommel
 .DS_Store
 Thumbs.db
